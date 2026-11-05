@@ -1,0 +1,28 @@
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Environment variables & secrets (giữ lại .env.example)
+.env
+.env.*
+!.env.example
+
+# Python Cache & Compiled Files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE & OS configuration
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
