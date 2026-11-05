@@ -1,0 +1,1 @@
+Change log 05/11/26 (1:31 PM): Test tính năng kết nối API với FE
