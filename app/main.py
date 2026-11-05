@@ -1,70 +1,38 @@
-import logging
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, Request, status
-from sqlalchemy.exc import SQLAlchemyError
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.database import check_db_connection, init_db
-from app.core.response import StandardResponse, success_response
-from app.middlewares.middleware import setup_middleware
+from app.api.segments import router as segments_router
+from app.api.observations import router as observations_router
+from app.api.traffic import router as traffic_router
+from app.api.forecast import router as forecast_router
+from app.api.auth import router as auth_router
 
-logger = logging.getLogger(__name__)
+app = FastAPI(title="Traffic Congestion Forecasting API", version="1.0.0")
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    try:
-        check_db_connection()
-        init_db()
-        logger.info("Successfully connected to Supabase PostgreSQL.")
-    except (SQLAlchemyError, OSError) as exc:
-        logger.error("Failed to connect to Supabase PostgreSQL: %s", exc)
-    yield
-
-
-app = FastAPI(title="Traffic System BE", version="0.1.2", lifespan=lifespan)
-
-setup_middleware(app)
-
-
-@app.get(
-    "/api/data",
-    response_model=StandardResponse[None],
-    status_code=status.HTTP_200_OK,
-    summary="API root",
-    tags=["system"],
+# Setup CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-def root(request: Request):
-    return success_response(
-        request=request, message="Chào mừng đến với hệ thống dự báo tắc đường"
-    )
 
 
-@app.get(
-    "/api/health",
-    response_model=StandardResponse[dict[str, str]],
-    status_code=status.HTTP_200_OK,
-    summary="System health check",
-    tags=["system"],
-)
-def health_check(request: Request):
-    db_status = "connected"
-    try:
-        check_db_connection()
-    except (SQLAlchemyError, OSError) as exc:
-        db_status = f"error: {exc}"
+@app.get("/api/health", tags=["health"])
+def health_check() -> dict[str, str]:
+    return {"status": "ok"}
 
-    return success_response(
-        request=request,
-        message="Health check passed",
-        data={"status": "ok", "database": db_status},
-    )
+
+# Register API routers with /api prefix
+app.include_router(segments_router, prefix="/api")
+app.include_router(observations_router, prefix="/api")
+app.include_router(traffic_router, prefix="/api")
+app.include_router(forecast_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(
-        "app.main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG
-    )
+    uvicorn.run("app.main:app", host="[IP_ADDRESS]", port=8000, reload=True)

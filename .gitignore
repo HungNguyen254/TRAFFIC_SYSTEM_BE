@@ -19,6 +19,14 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Model artifacts
+*.joblib
+
 # IDE & OS configuration
 .vscode/
 .idea/
