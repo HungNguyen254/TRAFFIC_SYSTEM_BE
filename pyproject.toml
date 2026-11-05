@@ -1,0 +1,14 @@
+[project]
+name = "traffic-system-be"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[standard]>=0.162.0",
+    "pydantic-settings>=2.16.2",
+    "pymysql>=1.2.3",
+    "sqlalchemy>=2.1.8",
+]
+
+
