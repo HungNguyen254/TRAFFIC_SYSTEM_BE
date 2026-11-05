@@ -1,4 +1,4 @@
-from fastapi import FastAPI, status, Request
+from fastapi import FastAPI, Request, status
 
 from app.core.config import settings
 from app.core.response import StandardResponse, success_response
