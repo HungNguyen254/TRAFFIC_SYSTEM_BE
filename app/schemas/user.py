@@ -1,5 +1,7 @@
 from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
 from app.schemas.observation import serialize_utc_z
 
 

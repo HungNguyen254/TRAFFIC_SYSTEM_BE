@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Any
-from app.models.segment import Segment
+
 from app.models.observation import TrafficObservation
+from app.models.segment import Segment
 
 FEATURE_COLUMNS = [
     "target_hour",
@@ -39,9 +40,17 @@ def extract_features(
     is_weekend_val = 1 if target_weekday >= 5 else 0
     is_rush = is_rush_hour(target_hour)
 
-    lag_0 = recent_observations[0].avg_speed_kmh if len(recent_observations) > 0 else segment.free_flow_speed_kmh
-    lag_1 = recent_observations[1].avg_speed_kmh if len(recent_observations) > 1 else lag_0
-    lag_2 = recent_observations[2].avg_speed_kmh if len(recent_observations) > 2 else lag_1
+    lag_0 = (
+        recent_observations[0].avg_speed_kmh
+        if len(recent_observations) > 0
+        else segment.free_flow_speed_kmh
+    )
+    lag_1 = (
+        recent_observations[1].avg_speed_kmh if len(recent_observations) > 1 else lag_0
+    )
+    lag_2 = (
+        recent_observations[2].avg_speed_kmh if len(recent_observations) > 2 else lag_1
+    )
 
     speed_trend = round(lag_0 - lag_1, 2)
 

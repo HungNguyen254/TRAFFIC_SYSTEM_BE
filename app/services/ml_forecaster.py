@@ -1,12 +1,12 @@
 import logging
 import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
+
 import joblib
 from sqlmodel import Session, select
 
-from app.models.segment import Segment
 from app.models.observation import TrafficObservation
+from app.models.segment import Segment
 from app.schemas.forecast import ForecastResponse
 from app.services.congestion import calculate_congestion_level
 from app.services.features import extract_features
@@ -19,14 +19,12 @@ from app.services.forecasting import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_PATH = os.path.join(
-    os.path.dirname(__file__), "ml_model.joblib"
-)
+DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "ml_model.joblib")
 MODEL_VERSION_ML = "ml-v1"
 
 
 class MLForecaster(Forecaster):
-    def __init__(self, model_path: Optional[str] = None):
+    def __init__(self, model_path: str | None = None):
         self.model_path = model_path or DEFAULT_MODEL_PATH
         self._model = None
         self._load_model()
@@ -36,8 +34,10 @@ class MLForecaster(Forecaster):
             try:
                 self._model = joblib.load(self.model_path)
                 logger.info("ML model successfully loaded from %s", self.model_path)
-            except Exception as e:
-                logger.warning("Failed to load ML model from %s: %s", self.model_path, e)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Failed to load ML model from %s: %s", self.model_path, e
+                )
                 self._model = None
         else:
             logger.info("ML model file %s does not exist yet.", self.model_path)
@@ -48,22 +48,26 @@ class MLForecaster(Forecaster):
         segment: Segment,
         horizon_minutes: int,
         session: Session,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> ForecastResponse:
         if horizon_minutes not in ALLOWED_HORIZONS:
-            raise ValueError(f"Invalid horizon {horizon_minutes}. Allowed: {ALLOWED_HORIZONS}")
+            raise ValueError(
+                f"Invalid horizon {horizon_minutes}. Allowed: {ALLOWED_HORIZONS}"
+            )
 
         if now is None:
             now = get_current_time()
         elif now.tzinfo is not None:
-            now = now.astimezone(timezone.utc).replace(tzinfo=None)
+            now = now.astimezone(UTC).replace(tzinfo=None)
 
         # 1. Fallback if model artifact is not loaded
         if self._model is None:
             # Try reloading once in case it was generated recently
             self._load_model()
             if self._model is None:
-                logger.info("Falling back to baseline-v1 because ML model artifact is missing.")
+                logger.info(
+                    "Falling back to baseline-v1 because ML model artifact is missing."
+                )
                 return baseline_forecaster.forecast(
                     segment=segment,
                     horizon_minutes=horizon_minutes,
@@ -102,7 +106,7 @@ class MLForecaster(Forecaster):
         # 4. Staleness guard: newest observation must not be older than 45 minutes
         obs_ts = recent_obs[0].timestamp
         if obs_ts.tzinfo is not None:
-            obs_ts = obs_ts.astimezone(timezone.utc).replace(tzinfo=None)
+            obs_ts = obs_ts.astimezone(UTC).replace(tzinfo=None)
         newest_obs_age = now - obs_ts
         if newest_obs_age > timedelta(minutes=45):
             logger.info(
@@ -129,8 +133,10 @@ class MLForecaster(Forecaster):
         try:
             preds = self._model.predict([features])
             raw_speed = float(preds[0])
-        except Exception as exc:
-            logger.warning("ML prediction failed: %s. Falling back to baseline-v1.", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ML prediction failed: %s. Falling back to baseline-v1.", exc
+            )
             return baseline_forecaster.forecast(
                 segment=segment,
                 horizon_minutes=horizon_minutes,

@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.core.database import get_session
-from app.models.segment import Segment
 from app.models.observation import TrafficObservation
-from app.schemas.observation import ObservationCreate, ObservationBulkResponse
+from app.models.segment import Segment
+from app.schemas.observation import ObservationBulkResponse, ObservationCreate
 
 router = APIRouter(prefix="/observations", tags=["observations"])
 
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/observations", tags=["observations"])
 @router.post("", response_model=ObservationBulkResponse, status_code=status.HTTP_200_OK)
 def bulk_create_observations(
     observations_in: list[ObservationCreate],
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session),  # noqa: B008
 ) -> ObservationBulkResponse:
     if not observations_in:
         return ObservationBulkResponse(inserted=0, skipped=0)
@@ -26,7 +26,7 @@ def bulk_create_observations(
     if missing_segment_ids:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"The following segment_id(s) do not exist: {sorted(list(missing_segment_ids))}",
+            detail=f"The following segment_id(s) do not exist: {sorted(missing_segment_ids)}",
         )
 
     # 2. Find range of timestamps in the batch for existing records lookup

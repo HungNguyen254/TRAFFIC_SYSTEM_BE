@@ -1,4 +1,3 @@
-from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 
@@ -18,14 +17,14 @@ class SegmentCreate(SegmentBase):
 
 
 class SegmentUpdate(BaseModel):
-    name: Optional[str] = None
-    start_lat: Optional[float] = None
-    start_lng: Optional[float] = None
-    end_lat: Optional[float] = None
-    end_lng: Optional[float] = None
-    length_m: Optional[float] = None
-    road_type: Optional[str] = None
-    free_flow_speed_kmh: Optional[float] = None
+    name: str | None = None
+    start_lat: float | None = None
+    start_lng: float | None = None
+    end_lat: float | None = None
+    end_lng: float | None = None
+    length_m: float | None = None
+    road_type: str | None = None
+    free_flow_speed_kmh: float | None = None
 
 
 class SegmentRead(SegmentBase):

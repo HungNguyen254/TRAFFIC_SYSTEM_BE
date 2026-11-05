@@ -1,9 +1,10 @@
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
+
 import jwt
+
 from app.core.config import settings
 
 ALGORITHM = "HS256"
@@ -26,14 +27,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
             "sha256", plain_password.encode("utf-8"), salt.encode("utf-8"), 100000
         )
         return hmac.compare_digest(key.hex(), expected_hex)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """Encode JWT access token with expiration."""
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
+    expire = datetime.now(UTC) + (
         expires_delta
         if expires_delta is not None
         else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -42,7 +43,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
 
 
-def decode_access_token(token: str) -> Optional[dict]:
+def decode_access_token(token: str) -> dict | None:
     """Decode and validate JWT token; returns payload dict or None if invalid/expired."""
     try:
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])

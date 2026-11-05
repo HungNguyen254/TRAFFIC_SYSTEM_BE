@@ -3,8 +3,8 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.database import get_session
-from app.models.segment import Segment
 from app.models.observation import TrafficObservation
+from app.models.segment import Segment
 from app.schemas.traffic import CurrentTrafficRead
 from app.services.congestion import calculate_congestion_level
 
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/traffic", tags=["traffic"])
 
 @router.get("/current", response_model=list[CurrentTrafficRead])
 def get_current_traffic(
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session),  # noqa: B008
 ) -> list[CurrentTrafficRead]:
     # Portable query: find max timestamp per segment, join to get the observation and free_flow_speed
     subquery = (

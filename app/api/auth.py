@@ -13,7 +13,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(
     user_in: UserCreate,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session),  # noqa: B008
 ) -> User:
     existing = session.exec(
         select(User).where(
@@ -42,7 +42,7 @@ def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: Request,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session),  # noqa: B008
 ) -> TokenResponse:
     content_type = request.headers.get("content-type", "")
     username = ""
@@ -51,7 +51,7 @@ async def login(
     if "application/json" in content_type:
         try:
             data = await request.json()
-        except Exception:
+        except Exception:  # noqa: BLE001
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid JSON payload",
@@ -84,5 +84,5 @@ async def login(
 
 
 @router.get("/me", response_model=UserRead)
-def get_me(current_user: User = Depends(get_current_user)) -> User:
+def get_me(current_user: User = Depends(get_current_user)) -> User:  # noqa: B008
     return current_user

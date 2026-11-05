@@ -1,11 +1,10 @@
-from typing import Optional
 from sqlmodel import Field, SQLModel
 
 
 class Segment(SQLModel, table=True):
     __tablename__ = "segment"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     start_lat: float
     start_lng: float

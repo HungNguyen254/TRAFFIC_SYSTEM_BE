@@ -1,5 +1,5 @@
 import json
-from typing import Union
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
-    def assemble_cors_origins(cls, v: Union[str, list[str]]) -> list[str]:
+    def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, str):
             v = v.strip()
             if v.startswith("[") and v.endswith("]"):
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
                     parsed = json.loads(v)
                     if isinstance(parsed, list):
                         return [str(item) for item in parsed]
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
             return [item.strip() for item in v.split(",") if item.strip()]
         elif isinstance(v, list):

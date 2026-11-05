@@ -1,15 +1,15 @@
 from datetime import datetime
-from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select
 
 from app.core.auth import get_current_user, require_admin
 from app.core.database import get_session
-from app.models.segment import Segment
 from app.models.observation import TrafficObservation
+from app.models.segment import Segment
 from app.models.user import User
-from app.schemas.segment import SegmentCreate, SegmentRead, SegmentUpdate
 from app.schemas.observation import ObservationRead, ensure_naive_utc
+from app.schemas.segment import SegmentCreate, SegmentRead, SegmentUpdate
 
 router = APIRouter(prefix="/segments", tags=["segments"])
 
@@ -18,8 +18,8 @@ router = APIRouter(prefix="/segments", tags=["segments"])
 def list_segments(
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
 ) -> list[Segment]:
     statement = select(Segment).offset(offset).limit(limit)
     return list(session.exec(statement).all())
@@ -28,8 +28,8 @@ def list_segments(
 @router.get("/{id}", response_model=SegmentRead)
 def get_segment(
     id: int,
-    session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
 ) -> Segment:
     segment = session.get(Segment, id)
     if not segment:
@@ -43,8 +43,8 @@ def get_segment(
 @router.post("", response_model=SegmentRead, status_code=status.HTTP_201_CREATED)
 def create_segment(
     segment_in: SegmentCreate,
-    session: Session = Depends(get_session),
-    admin_user: User = Depends(require_admin),
+    session: Session = Depends(get_session),  # noqa: B008
+    admin_user: User = Depends(require_admin),  # noqa: B008
 ) -> Segment:
     segment = Segment.model_validate(segment_in)
     session.add(segment)
@@ -57,8 +57,8 @@ def create_segment(
 def update_segment(
     id: int,
     segment_in: SegmentUpdate,
-    session: Session = Depends(get_session),
-    admin_user: User = Depends(require_admin),
+    session: Session = Depends(get_session),  # noqa: B008
+    admin_user: User = Depends(require_admin),  # noqa: B008
 ) -> Segment:
     segment = session.get(Segment, id)
     if not segment:
@@ -80,8 +80,8 @@ def update_segment(
 @router.delete("/{id}")
 def delete_segment(
     id: int,
-    session: Session = Depends(get_session),
-    admin_user: User = Depends(require_admin),
+    session: Session = Depends(get_session),  # noqa: B008
+    admin_user: User = Depends(require_admin),  # noqa: B008
 ) -> dict[str, str]:
     segment = session.get(Segment, id)
     if not segment:
@@ -92,6 +92,7 @@ def delete_segment(
 
     # Clean up associated observations first to preserve foreign key integrity
     from sqlmodel import delete
+
     session.exec(delete(TrafficObservation).where(TrafficObservation.segment_id == id))
 
     session.delete(segment)
@@ -102,11 +103,11 @@ def delete_segment(
 @router.get("/{id}/history", response_model=list[ObservationRead])
 def get_segment_history(
     id: int,
-    start: Optional[datetime] = Query(default=None),
-    end: Optional[datetime] = Query(default=None),
+    start: datetime | None = Query(default=None),  # noqa: B008
+    end: datetime | None = Query(default=None),  # noqa: B008
     limit: int = Query(default=500, ge=1, le=5000),
-    session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
 ) -> list[TrafficObservation]:
     segment = session.get(Segment, id)
     if not segment:
@@ -118,9 +119,13 @@ def get_segment_history(
     statement = select(TrafficObservation).where(TrafficObservation.segment_id == id)
 
     if start is not None:
-        statement = statement.where(TrafficObservation.timestamp >= ensure_naive_utc(start))
+        statement = statement.where(
+            TrafficObservation.timestamp >= ensure_naive_utc(start)
+        )
     if end is not None:
-        statement = statement.where(TrafficObservation.timestamp <= ensure_naive_utc(end))
+        statement = statement.where(
+            TrafficObservation.timestamp <= ensure_naive_utc(end)
+        )
 
     statement = statement.order_by(TrafficObservation.timestamp.asc()).limit(limit)
     return list(session.exec(statement).all())

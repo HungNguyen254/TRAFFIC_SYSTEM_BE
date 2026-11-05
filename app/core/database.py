@@ -1,5 +1,7 @@
 from collections.abc import Generator
+
 from sqlmodel import Session, create_engine
+
 from app.core.config import settings
 
 connect_args = {}
@@ -13,7 +15,7 @@ engine = create_engine(
 )
 
 
-def get_session() -> Generator[Session, None, None]:
+def get_session() -> Generator[Session]:
     """Dependency for providing a SQLModel Session per request."""
     with Session(engine) as session:
         yield session

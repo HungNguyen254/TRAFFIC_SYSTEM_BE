@@ -1,4 +1,5 @@
 from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select
 
@@ -24,13 +25,13 @@ def get_clock() -> datetime:
 def get_forecast_map(
     horizon: int = Query(...),
     model: str = Query(default="ml", pattern="^(ml|baseline)$"),
-    session: Session = Depends(get_session),
-    now: datetime = Depends(get_clock),
+    session: Session = Depends(get_session),  # noqa: B008
+    now: datetime = Depends(get_clock),  # noqa: B008
 ) -> list[ForecastResponse]:
     if horizon not in ALLOWED_HORIZONS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Invalid horizon {horizon}. Allowed values: {sorted(list(ALLOWED_HORIZONS))}",
+            detail=f"Invalid horizon {horizon}. Allowed values: {sorted(ALLOWED_HORIZONS)}",
         )
 
     forecaster = ml_forecaster if model == "ml" else baseline_forecaster
@@ -52,13 +53,13 @@ def get_forecast(
     segment_id: int = Query(...),
     horizon: int = Query(...),
     model: str = Query(default="ml", pattern="^(ml|baseline)$"),
-    session: Session = Depends(get_session),
-    now: datetime = Depends(get_clock),
+    session: Session = Depends(get_session),  # noqa: B008
+    now: datetime = Depends(get_clock),  # noqa: B008
 ) -> ForecastResponse:
     if horizon not in ALLOWED_HORIZONS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Invalid horizon {horizon}. Allowed values: {sorted(list(ALLOWED_HORIZONS))}",
+            detail=f"Invalid horizon {horizon}. Allowed values: {sorted(ALLOWED_HORIZONS)}",
         )
 
     segment = session.get(Segment, segment_id)

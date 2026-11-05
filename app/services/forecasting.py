@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
+
 from sqlmodel import Session, select
 
-from app.models.segment import Segment
 from app.models.observation import TrafficObservation
+from app.models.segment import Segment
 from app.schemas.forecast import ForecastResponse
 from app.services.congestion import calculate_congestion_level
 
@@ -14,7 +14,7 @@ MODEL_VERSION_BASELINE = "baseline-v1"
 
 def get_current_time() -> datetime:
     """Dependency / helper to get current naive UTC datetime."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Forecaster(ABC):
@@ -24,7 +24,7 @@ class Forecaster(ABC):
         segment: Segment,
         horizon_minutes: int,
         session: Session,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> ForecastResponse:
         pass
 
@@ -35,15 +35,17 @@ class BaselineForecaster(Forecaster):
         segment: Segment,
         horizon_minutes: int,
         session: Session,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> ForecastResponse:
         if horizon_minutes not in ALLOWED_HORIZONS:
-            raise ValueError(f"Invalid horizon {horizon_minutes}. Allowed: {ALLOWED_HORIZONS}")
+            raise ValueError(
+                f"Invalid horizon {horizon_minutes}. Allowed: {ALLOWED_HORIZONS}"
+            )
 
         if now is None:
             now = get_current_time()
         elif now.tzinfo is not None:
-            now = now.astimezone(timezone.utc).replace(tzinfo=None)
+            now = now.astimezone(UTC).replace(tzinfo=None)
 
         target_time = now + timedelta(minutes=horizon_minutes)
         lookback_start = now - timedelta(days=56)  # 8 weeks before now
