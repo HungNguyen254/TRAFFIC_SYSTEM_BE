@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 
@@ -24,4 +25,18 @@ def success_response[T](
 ) -> StandardResponse[T]:
     return StandardResponse[T](
         status_code=status_code, message=message, data=data, path=request.url.path
+    )
+
+
+def error_response(
+    request: Request,
+    message: str,
+    status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    error: Any | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=StandardResponse[None](
+            status_code=status_code, message=message, error=error, path=request.url.path
+        ).model_dump(mode="json"),
     )
