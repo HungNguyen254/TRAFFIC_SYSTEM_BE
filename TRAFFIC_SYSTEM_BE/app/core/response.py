@@ -25,3 +25,19 @@ def success_response[T](
     return StandardResponse[T](
         status_code=status_code, message=message, data=data, path=request.url.path
     )
+
+
+def failed_response[T](
+    request: Request,
+    message: str,
+    status_code: int = status.HTTP_400_BAD_REQUEST,
+    error: Any | None = None,
+    data: T | None = None,
+) -> StandardResponse[T]:
+    return StandardResponse[T](
+        status_code=status_code,
+        message=message,
+        error=error,
+        data=data,
+        path=request.url.path,
+    )
