@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.database import check_db_connection, init_db
+from app.core.handlers import register_handler
 from app.core.response import StandardResponse, success_response
 from app.middlewares.middleware import setup_middleware
 
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Traffic System BE", version="0.1.2", lifespan=lifespan)
 
 setup_middleware(app)
+register_handler(app)
 
 
 @app.get(

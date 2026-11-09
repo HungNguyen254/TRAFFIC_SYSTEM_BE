@@ -1,0 +1,35 @@
+# Dependencies & Libraries
+node_modules/
+dist/
+build/
+*.egg-info/
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Python Cache & Testing
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment variables & secrets (giữ lại .env.example)
+.env
+.env.local
+.env.*
+!.env.example
+
+# IDE & OS cache
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
