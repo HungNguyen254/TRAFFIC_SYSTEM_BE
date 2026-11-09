@@ -1,14 +1,15 @@
+# Dependencies & Libraries
+node_modules/
+dist/
+build/
+*.egg-info/
+
 # Virtual Environment
 .venv/
 venv/
 env/
 
-# Environment variables & secrets (giữ lại .env.example)
-.env
-.env.*
-!.env.example
-
-# Python Cache & Compiled Files
+# Python Cache & Testing
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,7 +20,13 @@ __pycache__/
 .coverage
 htmlcov/
 
-# IDE & OS configuration
+# Environment variables & secrets (giữ lại .env.example)
+.env
+.env.local
+.env.*
+!.env.example
+
+# IDE & OS cache
 .vscode/
 .idea/
 *.swp
