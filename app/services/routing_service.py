@@ -1,0 +1,198 @@
+import uuid
+from dataclasses import dataclass
+from itertools import pairwise
+
+import networkx as nx
+from sqlmodel import Session, select
+
+from app.core.exceptions import BadRequestException, NotFoundException
+from app.models.edge import Edge
+from app.models.node import Node
+from app.models.prediction import Prediction
+from app.schemas.routing import RouteResult, RouteStep, WeightMode
+
+MIN_SPEED_KMH = 1.0
+
+
+@dataclass(frozen=True)
+class TrafficGraph:
+    network: nx.MultiDiGraph
+    hour_of_day: int | None
+    node_count: int
+    edge_count: int
+    skipped_edge_count: int
+
+
+def _speed_and_risk(edge: Edge, prediction: Prediction | None) -> tuple[float, float, str]:
+    """Return (speed_kmh, risk_factor, source), falling back to the legal limit."""
+    if prediction is None:
+        return float(edge.max_speed_limit), 0.0, "limit"
+    return float(prediction.predicted_speed), float(prediction.risk_factor), "predicted"
+
+
+def _cheapest_edge(network: nx.MultiDiGraph, start: uuid.UUID, end: uuid.UUID) -> dict:
+    """Return the attributes of the cheapest edge between two adjacent nodes."""
+    # Two Edge rows may share one node pair (parallel roads); Dijkstra costs the cheapest.
+    return min(network[start][end].values(), key=lambda attrs: attrs["weight"])
+
+
+def build_graph(
+    session: Session,
+    hour_of_day: int | None = None,
+    weight_mode: WeightMode = "distance",
+) -> TrafficGraph:
+    """Build a road graph whose edge cost is km, or traffic-aware minutes in duration mode."""
+    if hour_of_day is not None and not 0 <= hour_of_day <= 23:
+        raise BadRequestException(
+            message="Khung giờ dự báo phải trong khoảng 0 đến 23!",
+            error_code="ROUTE_HOUR_OUT_OF_RANGE",
+            details={"hour_of_day": hour_of_day},
+        )
+
+    nodes = list(session.exec(select(Node)).all())
+    if not nodes:
+        raise NotFoundException(
+            message="Chưa có dữ liệu nút giao để dựng đồ thị!",
+            error_code="GRAPH_EMPTY",
+        )
+
+    predictions: dict[uuid.UUID, Prediction] = {}
+    if hour_of_day is not None:
+        db_predictions = session.exec(
+            select(Prediction).where(Prediction.hour_of_day == hour_of_day)
+        ).all()
+        for prediction in db_predictions:
+            predictions[prediction.edge_id] = prediction
+
+    network = nx.MultiDiGraph()
+    for node in nodes:
+        network.add_node(
+            node.node_id,
+            node_code=node.node_code,
+            node_name=node.node_name,
+            latitude=node.latitude,
+            longitude=node.longitude,
+        )
+
+    skipped = 0
+    for edge in session.exec(select(Edge)).all():
+        speed_kmh, risk, speed_source = _speed_and_risk(
+            edge, predictions.get(edge.edge_id)
+        )
+        if edge.from_node_id == edge.to_node_id:
+            skipped += 1
+            continue
+        if edge.length_km <= 0 or speed_kmh < MIN_SPEED_KMH:
+            skipped += 1
+            continue
+
+        travel_min = edge.length_km / speed_kmh * 60 * (1 + risk)
+        if weight_mode == "duration":
+            weight = travel_min
+        else:
+            weight = float(edge.length_km)
+
+        network.add_edge(
+            edge.from_node_id,
+            edge.to_node_id,
+            key=edge.edge_id,
+            edge_id=edge.edge_id,
+            edge_code=edge.edge_code,
+            street_name=edge.street_name,
+            length_km=edge.length_km,
+            travel_min=travel_min,
+            speed_kmh=speed_kmh,
+            risk_factor=risk,
+            speed_source=speed_source,
+            weight=weight,
+        )
+
+    return TrafficGraph(
+        network=network,
+        hour_of_day=hour_of_day,
+        node_count=network.number_of_nodes(),
+        edge_count=network.number_of_edges(),
+        skipped_edge_count=skipped,
+    )
+
+
+def find_route(
+    graph: TrafficGraph, origin_node_id: uuid.UUID, destination_node_id: uuid.UUID
+) -> RouteResult:
+    """Return the fastest route between two nodes using Dijkstra on the graph."""
+    network = graph.network
+
+    if origin_node_id == destination_node_id:
+        raise BadRequestException(
+            message="Điểm đi và điểm đến trùng nhau!",
+            error_code="ROUTE_SAME_ENDPOINT",
+            details={"node_id": str(origin_node_id)},
+        )
+
+    if origin_node_id not in network or destination_node_id not in network:
+        unknown = []
+        if origin_node_id not in network:
+            unknown.append(str(origin_node_id))
+        if destination_node_id not in network:
+            unknown.append(str(destination_node_id))
+        raise BadRequestException(
+            message="Không tìm thấy nút giao trong đồ thị!",
+            error_code="ROUTE_NODE_NOT_FOUND",
+            details={"unknown_node_ids": unknown},
+        )
+
+    try:
+        node_path = nx.dijkstra_path(
+            network, origin_node_id, destination_node_id, weight="weight"
+        )
+    except nx.NetworkXNoPath as exc:
+        raise NotFoundException(
+            message="Không tìm được tuyến phù hợp giữa hai điểm đã chọn!",
+            error_code="NO_ROUTE_FOUND",
+            details={
+                "reason": "one_way_disconnected",
+                "origin_node_id": str(origin_node_id),
+                "destination_node_id": str(destination_node_id),
+                "hour_of_day": graph.hour_of_day,
+            },
+        ) from exc
+
+    steps = []
+    for start, end in pairwise(node_path):
+        attrs = _cheapest_edge(network, start, end)
+        step = RouteStep(
+            edge_id=attrs["edge_id"],
+            edge_code=attrs["edge_code"],
+            street_name=attrs["street_name"],
+            length_km=attrs["length_km"],
+            travel_min=round(attrs["travel_min"], 2),
+            speed_kmh=attrs["speed_kmh"],
+            risk_factor=attrs["risk_factor"],
+            speed_source=attrs["speed_source"],
+        )
+        steps.append(step)
+
+    node_names = []
+    polyline = []
+    for node_id in node_path:
+        data = network.nodes[node_id]
+        node_names.append(data["node_name"])
+        polyline.append([data["latitude"], data["longitude"]])
+
+    total_distance_km = round(sum(step.length_km for step in steps), 2)
+    total_duration_min = round(sum(step.travel_min for step in steps), 2)
+    max_risk_factor = round(max((step.risk_factor for step in steps), default=0.0), 2)
+
+    return RouteResult(
+        origin_node_id=origin_node_id,
+        destination_node_id=destination_node_id,
+        node_ids=node_path,
+        node_names=node_names,
+        edge_ids=[step.edge_id for step in steps],
+        steps=steps,
+        polyline=polyline,
+        total_distance_km=total_distance_km,
+        total_duration_min=total_duration_min,
+        max_risk_factor=max_risk_factor,
+        hour_of_day=graph.hour_of_day,
+    )
