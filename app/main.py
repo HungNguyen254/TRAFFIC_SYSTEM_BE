@@ -1,12 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, Response, status
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.database import check_db_connection, init_db
-from app.core.response import StandardResponse, success_response
+from app.core.response import StandardResponse, failed_response, success_response
 from app.middlewares.middleware import setup_middleware
 
 logger = logging.getLogger(__name__)
@@ -44,16 +44,23 @@ def root(request: Request):
 @app.get(
     "/api/health",
     response_model=StandardResponse[dict[str, str]],
-    status_code=status.HTTP_200_OK,
+    responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": StandardResponse[None]}},
     summary="System health check",
     tags=["system"],
 )
-def health_check(request: Request):
+def health_check(request: Request, response: Response):
     db_status = "connected"
     try:
         check_db_connection()
     except (SQLAlchemyError, OSError) as exc:
-        db_status = f"error: {exc}"
+        logger.warning("Health check: database unreachable: %s", exc)
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return failed_response(
+            request=request,
+            message="Health check failed",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            error="database unreachable",
+        )
 
     return success_response(
         request=request,
