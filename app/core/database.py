@@ -24,6 +24,8 @@ db_url = _build_database_url(settings.DATABASE_URL)
 connect_args: dict[str, object] = {}
 if ":6543" in db_url or "pooler.supabase.com" in db_url:
     connect_args["prepare_threshold"] = None
+if "sqlite" in db_url:
+    connect_args["check_same_thread"] = False
 
 engine = create_engine(
     db_url,
@@ -36,6 +38,7 @@ engine = create_engine(
 
 def init_db() -> None:
     """Create all database tables defined in SQLModel metadata."""
+    import app.models
     SQLModel.metadata.create_all(engine)
 
 

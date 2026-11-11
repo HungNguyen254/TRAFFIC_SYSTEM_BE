@@ -5,11 +5,14 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware  # <-- Đã thêm CORS
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.v1.router import api_v1_router
 from app.core.config import settings
 from app.core.database import check_db_connection, init_db
 from app.core.handlers import register_handler
 from app.core.response import StandardResponse, success_response
 from app.middlewares.middleware import setup_middleware
+from app.services.prediction_service import PredictionService
+
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,8 @@ async def lifespan(app: FastAPI):
         logger.info("Successfully connected to Supabase PostgreSQL.")
     except (SQLAlchemyError, OSError) as exc:
         logger.error("Failed to connect to Supabase PostgreSQL: %s", exc)
+    
+    PredictionService.load_model()
     yield
 
 
@@ -37,6 +42,7 @@ app.add_middleware(
 
 setup_middleware(app)
 register_handler(app)
+app.include_router(api_v1_router)
 
 
 @app.get(
