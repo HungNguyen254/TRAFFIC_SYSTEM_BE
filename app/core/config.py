@@ -8,7 +8,10 @@ class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 8000
 
-    ALLOWED_ORIGINS: list[str] = ["http://127.0.0.1:5173"]
+    ALLOWED_ORIGINS: list[str] = [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
 
     DATABASE_URL: str = "sqlite:///./traffic.db"
     DIRECT_URL: str | None = None
