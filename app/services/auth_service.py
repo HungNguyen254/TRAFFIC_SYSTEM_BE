@@ -3,7 +3,12 @@ from sqlmodel import Session, select
 
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+)
 
 
 class AuthService:
@@ -42,3 +47,17 @@ class AuthService:
             role=user.role,
             user_id=user.user_id,
         )
+
+    @staticmethod
+    def change_password(
+        session: Session, user: User, payload: ChangePasswordRequest
+    ) -> None:
+        if not verify_password(payload.current_password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Mật khẩu hiện tại không chính xác.",
+            )
+
+        user.password_hash = hash_password(payload.new_password)
+        session.add(user)
+        session.commit()
