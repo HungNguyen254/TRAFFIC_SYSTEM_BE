@@ -7,7 +7,13 @@ from app.core.limiter import limiter
 from app.core.response import StandardResponse, success_response
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserResponse,
+)
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -59,3 +65,20 @@ def get_me(request: Request, current_user: Annotated[User, Depends(get_current_u
         created_at=current_user.created_at,
     )
     return success_response(request=request, message="Lấy thông tin thành công", data=user_res)
+
+
+@router.post(
+    "/change-password",
+    response_model=StandardResponse[None],
+    status_code=status.HTTP_200_OK,
+    summary="Đổi mật khẩu tài khoản đang đăng nhập",
+)
+@limiter.limit("5/minute")
+def change_password(
+    request: Request,
+    payload: ChangePasswordRequest,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    AuthService.change_password(session, current_user, payload)
+    return success_response(request=request, message="Đổi mật khẩu thành công")
