@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Query, Request, status
 
 from app.core.database import SessionDep
+from app.core.limiter import limiter
 from app.core.response import StandardResponse, success_response
 from app.schemas.routing import RouteResult, WeightMode
 from app.services.routing_service import build_graph, find_route
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/directions", tags=["directions"])
     status_code=status.HTTP_200_OK,
     summary="Tìm tuyến từ điểm đi đến điểm đến: polyline, quãng đường, các đoạn đi qua",
 )
+@limiter.limit("20/minute")
 def get_directions(
     request: Request,
     session: SessionDep,
