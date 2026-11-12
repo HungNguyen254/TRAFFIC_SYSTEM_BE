@@ -1,5 +1,6 @@
 import csv
 import logging
+import unicodedata
 import uuid
 from functools import lru_cache
 from pathlib import Path
@@ -10,6 +11,13 @@ from sqlmodel import Session, select
 from app.models.edge import Edge
 
 logger = logging.getLogger(__name__)
+
+def strip_accents(value: str) -> str:
+    """Bỏ dấu tiếng Việt + lowercase: 'Đường Láng' -> 'duong lang'."""
+    normalized = unicodedata.normalize("NFD", value)
+    without_marks = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
+    return without_marks.replace("đ", "d").replace("Đ", "d").lower()
+
 
 DATA_DIR = Path("data")
 SYNTHETIC_CSV = DATA_DIR / "synthetic_traffic_dataset.csv"
@@ -72,9 +80,24 @@ class TrafficService:
 
     @staticmethod
     def get_edges_by_street(session: Session, street_name: str) -> list[Edge]:
-        """Tìm các đoạn đường khớp tên (không phân biệt hoa thường, khớp một phần)."""
+        """Tìm các đoạn đường khớp tên (không phân biệt hoa thường/thanh điệu, khớp một phần).
+
+        Ưu tiên: ilike chính xác trên DB -> nếu rỗng thì fallback so sánh bỏ dấu
+        (cho phép người dùng gõ "Kim Ma", "Nguyen Trai"... vẫn tìm được).
+        """
         query = select(Edge).where(Edge.street_name.ilike(f"%{street_name.strip()}%"))
-        return list(session.exec(query).all())
+        edges = list(session.exec(query).all())
+        if edges:
+            return edges
+
+        target = strip_accents(street_name.strip())
+        if not target:
+            return []
+        return [
+            edge
+            for edge in session.exec(select(Edge)).all()
+            if target in strip_accents(edge.street_name or "")
+        ]
 
     @staticmethod
     def get_edge_by_id(session: Session, edge_id: uuid.UUID) -> Optional[Edge]:
