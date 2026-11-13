@@ -52,8 +52,18 @@ def train_model(
 
             import_traffic_csv(csv_path=DEFAULT_CSV_PATH, session=db_session)
 
-        # Query traffic data from database
-        rows = db_session.exec(select(TrafficData)).all()
+        # Query traffic feature columns directly from database
+        query = select(
+            TrafficData.hour_of_day,
+            TrafficData.day_of_week,
+            TrafficData.is_weekend,
+            TrafficData.is_rush_hour,
+            TrafficData.weather_code,
+            TrafficData.length_km,
+            TrafficData.max_speed_limit,
+            TrafficData.average_speed,
+        )
+        rows = db_session.exec(query).all()
         if not rows:
             raise ValueError("Cannot train model: traffic_data table is empty.")
 
@@ -61,16 +71,16 @@ def train_model(
         y_list = []
         for row in rows:
             features = [
-                float(row.hour_of_day),
-                float(row.day_of_week),
-                float(row.is_weekend),
-                float(row.is_rush_hour),
-                float(row.weather_code),
-                float(row.length_km),
-                float(row.max_speed_limit),
+                float(row[0]),
+                float(row[1]),
+                float(row[2]),
+                float(row[3]),
+                float(row[4]),
+                float(row[5]),
+                float(row[6]),
             ]
             X_list.append(features)
-            y_list.append(float(row.average_speed))
+            y_list.append(float(row[7]))
 
         X = np.array(X_list, dtype=np.float32)
         y = np.array(y_list, dtype=np.float32)

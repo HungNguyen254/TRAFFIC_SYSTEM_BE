@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 import joblib
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -50,3 +51,32 @@ def test_train_model_from_database_and_save_to_db():
 
         old_model = session.exec(select(MLModel).where(MLModel.version == 1)).first()
         assert old_model.is_active is False
+
+
+def test_train_model_auto_seeds_when_traffic_data_empty(monkeypatch, tmp_path: Path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+
+    # Point DEFAULT_CSV_PATH to sample csv with minimal valid rows
+    dummy_csv = tmp_path / "synthetic_traffic_dataset.csv"
+    with open(dummy_csv, "w", newline="", encoding="utf-8") as f:
+        f.write(
+            "edge_code,street_name,length_km,max_speed_limit,hour_of_day,day_of_week,is_weekend,is_rush_hour,weather_code,average_speed,congestion_level,risk_factor\n"
+        )
+        for i in range(15):
+            f.write(f"EDGE_TEST,Street,1.0,50,{i%24},{i%7},0,0,0,30.0,2,0.4\n")
+
+    monkeypatch.setattr("scripts.train_prediction_model.DEFAULT_CSV_PATH", dummy_csv)
+
+    with Session(engine) as session:
+        # Table is initially empty
+        count = session.exec(select(TrafficData)).all()
+        assert len(count) == 0
+
+        model, db_model = train_model(session=session)
+        assert model is not None
+        assert db_model.is_active is True
+
+        # Should have auto-seeded 15 records
+        rows = session.exec(select(TrafficData)).all()
+        assert len(rows) == 15

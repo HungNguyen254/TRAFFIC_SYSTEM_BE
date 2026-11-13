@@ -17,6 +17,21 @@ from app.models.traffic_data import TrafficData
 
 logger = logging.getLogger(__name__)
 
+REQUIRED_COLUMNS = {
+    "edge_code",
+    "street_name",
+    "length_km",
+    "max_speed_limit",
+    "hour_of_day",
+    "day_of_week",
+    "is_weekend",
+    "is_rush_hour",
+    "weather_code",
+    "average_speed",
+    "congestion_level",
+    "risk_factor",
+}
+
 
 def import_traffic_csv(
     csv_path: str | Path,
@@ -28,32 +43,43 @@ def import_traffic_csv(
     if not path.exists():
         raise FileNotFoundError(f"Traffic CSV file not found: {path}")
 
-    if truncate:
-        logger.info("Truncating existing records in traffic_data table...")
-        session.exec(delete(TrafficData))
-        session.commit()
-
     total_inserted = 0
     batch: list[TrafficData] = []
 
     with open(path, mode="r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        for row in reader:
-            record = TrafficData(
-                edge_code=row["edge_code"].strip(),
-                street_name=row["street_name"].strip(),
-                length_km=float(row["length_km"]),
-                max_speed_limit=int(float(row["max_speed_limit"])),
-                hour_of_day=int(row["hour_of_day"]),
-                day_of_week=int(row["day_of_week"]),
-                is_weekend=int(row["is_weekend"]),
-                is_rush_hour=int(row["is_rush_hour"]),
-                weather_code=float(row["weather_code"]),
-                average_speed=float(row["average_speed"]),
-                congestion_level=int(row["congestion_level"]),
-                risk_factor=float(row["risk_factor"]),
-            )
-            batch.append(record)
+        fields = set(reader.fieldnames or [])
+        missing = REQUIRED_COLUMNS - fields
+        if missing:
+            raise ValueError(f"Missing required columns in CSV: {sorted(missing)}")
+
+        if truncate:
+            logger.info("Truncating existing records in traffic_data table...")
+            session.exec(delete(TrafficData))
+            session.commit()
+
+        for line_num, row in enumerate(reader, start=2):
+            try:
+                record = TrafficData(
+                    edge_code=str(row["edge_code"]).strip(),
+                    street_name=str(row["street_name"]).strip(),
+                    length_km=float(row["length_km"]),
+                    max_speed_limit=int(float(row["max_speed_limit"])),
+                    hour_of_day=int(row["hour_of_day"]),
+                    day_of_week=int(row["day_of_week"]),
+                    is_weekend=int(row["is_weekend"]),
+                    is_rush_hour=int(row["is_rush_hour"]),
+                    weather_code=float(row["weather_code"]),
+                    average_speed=float(row["average_speed"]),
+                    congestion_level=int(row["congestion_level"]),
+                    risk_factor=float(row["risk_factor"]),
+                )
+                batch.append(record)
+            except (KeyError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "Skipping invalid row at line %d: %s", line_num, exc
+                )
+                continue
 
             if len(batch) >= batch_size:
                 session.add_all(batch)
