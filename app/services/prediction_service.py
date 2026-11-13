@@ -1,3 +1,4 @@
+import io
 import logging
 import threading
 import uuid
@@ -10,7 +11,9 @@ import numpy as np
 from fastapi import HTTPException, status
 from sqlmodel import Session, select
 
+from app.core.database import engine
 from app.models.edge import Edge
+from app.models.ml_model import MLModel
 from app.models.prediction import Prediction
 from app.schemas.prediction import (
     PredictionRequest,
@@ -29,21 +32,36 @@ class PredictionService:
     _lock = threading.Lock()
 
     @classmethod
-    def load_model(cls) -> None:
-        if MODEL_PATH.exists():
-            try:
-                cls._model = joblib.load(MODEL_PATH)
-                logger.info("Successfully loaded ML prediction model from %s", MODEL_PATH)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    "Failed to load model file %s: %s. Using heuristic fallback.", MODEL_PATH, e
+    def load_model(cls, session: Session | None = None) -> None:
+        owns_session = session is None
+        db_session = Session(engine) if owns_session else session
+        try:
+            statement = (
+                select(MLModel)
+                .where(MLModel.model_name == "traffic_speed_rf", MLModel.is_active == True)
+                .order_by(MLModel.version.desc())
+            )
+            db_model = db_session.exec(statement).first()
+            if db_model and db_model.model_bytes:
+                cls._model = joblib.load(io.BytesIO(db_model.model_bytes))
+                logger.info(
+                    "Successfully loaded ML model '%s' v%d from database",
+                    db_model.model_name,
+                    db_model.version,
+                )
+            else:
+                logger.info(
+                    "No active ML model found in database. Using heuristic fallback."
                 )
                 cls._model = None
-        else:
-            logger.info(
-                "Model file %s not found. Will use heuristic fallback until retrained.", MODEL_PATH
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Failed to load ML model from database: %s. Using heuristic fallback.", e
             )
             cls._model = None
+        finally:
+            if owns_session:
+                db_session.close()
 
     @classmethod
     def reload_model(cls) -> None:
