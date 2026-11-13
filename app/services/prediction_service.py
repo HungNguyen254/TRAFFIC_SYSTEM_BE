@@ -195,11 +195,8 @@ class PredictionService:
         if payload.edge_id:
             edge = session.get(Edge, payload.edge_id)
         elif payload.street_name:
-            from app.services.traffic_service import TrafficService
-
-            edges = TrafficService.get_edges_by_street(session, payload.street_name)
-            if edges:
-                edge = edges[0]
+            query = select(Edge).where(Edge.street_name.ilike(f"%{payload.street_name.strip()}%"))
+            edge = session.exec(query).first()
 
         if not edge:
             raise HTTPException(
