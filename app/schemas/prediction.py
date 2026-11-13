@@ -15,6 +15,7 @@ class PredictionRequest(BaseModel):
     minutes_ahead: list[Annotated[int, Field(ge=1, le=1440)]] = Field(
         default=[30, 60, 120],
         min_length=1,
+        max_length=24,
         description="Danh sách các mốc phút tương lai cần dự đoán (ví dụ: [30, 60, 120]).",
     )
     weather: str = Field(
