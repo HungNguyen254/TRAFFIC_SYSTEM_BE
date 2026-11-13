@@ -33,3 +33,6 @@ Thumbs.db
 *.sqlite3
 *.joblib
 
+# Tooling & internal workspaces
+.superpowers/
+
