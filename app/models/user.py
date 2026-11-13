@@ -15,5 +15,6 @@ class User(SQLModel, table=True):
     password_hash: str = Field(max_length=255)
     full_name: str = Field(max_length=100)
     role: str = Field(default="user", max_length=20)
+    token_version: int = Field(default=1, nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
