@@ -58,12 +58,23 @@ def parse_bbox_param(
         except ValueError as exc:
             raise ValueError("Tham số bbox chứa giá trị không phải số hợp lệ.") from exc
 
-        # Tự động nhận diện thứ tự:
-        # Nếu val1 > val2 (ví dụ kinh độ Hà Nội ~105.8 > vĩ độ ~21.0), đây là định dạng min_lng,min_lat,max_lng,max_lat
-        if val1 > val2:
-            min_lng, min_lat, max_lng, max_lat = val1, val2, val3, val4
-        else:
+        # Nhận diện thứ tự tọa độ:
+        # Chuẩn GIS/GeoJSON (RFC 7946): [min_lng, min_lat, max_lng, max_lat]
+        # Nếu abs(val2) > 90 >= abs(val1) -> val2 chắc chắn là kinh độ: định dạng min_lat, min_lng, max_lat, max_lng
+        if abs(val2) > 90 >= abs(val1):
             min_lat, min_lng, max_lat, max_lng = val1, val2, val3, val4
+        else:
+            # Mặc định theo chuẩn GIS: min_lng, min_lat, max_lng, max_lat
+            min_lng, min_lat, max_lng, max_lat = val1, val2, val3, val4
+
+    # Kiểm tra phạm vi tọa độ địa lý
+    for lat, name in [(min_lat, "min_lat"), (max_lat, "max_lat")]:
+        if lat is not None and not (-90.0 <= lat <= 90.0):
+            raise ValueError(f"{name} ({lat}) không nằm trong phạm vi hợp lệ [-90, 90].")
+
+    for lng, name in [(min_lng, "min_lng"), (max_lng, "max_lng")]:
+        if lng is not None and not (-180.0 <= lng <= 180.0):
+            raise ValueError(f"{name} ({lng}) không nằm trong phạm vi hợp lệ [-180, 180].")
 
     # Kiểm tra hợp lệ nếu có cả min và max
     if min_lat is not None and max_lat is not None and min_lat > max_lat:

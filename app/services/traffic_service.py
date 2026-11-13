@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
@@ -183,7 +183,7 @@ class TrafficService:
         ]
 
     @staticmethod
-    def get_edge_by_id(session: Session, edge_id: uuid.UUID) -> Optional[Edge]:
+    def get_edge_by_id(session: Session, edge_id: uuid.UUID) -> Edge | None:
         return session.get(Edge, edge_id)
 
     @staticmethod

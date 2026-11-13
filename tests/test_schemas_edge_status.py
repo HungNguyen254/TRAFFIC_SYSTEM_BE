@@ -95,6 +95,29 @@ class TestSchemasEdgeStatus(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_bbox_param(bbox="invalid,bbox,format")
 
+        # Range boundaries [-90, 90] and [-180, 180]
+        with self.assertRaises(ValueError):
+            parse_bbox_param(min_lat=-95.0)
+
+        with self.assertRaises(ValueError):
+            parse_bbox_param(max_lat=95.0)
+
+        with self.assertRaises(ValueError):
+            parse_bbox_param(min_lng=-185.0)
+
+        with self.assertRaises(ValueError):
+            parse_bbox_param(max_lng=185.0)
+
+    def test_parse_bbox_standard_gis_order(self):
+        from app.schemas.edge_status import parse_bbox_param
+
+        # When coordinates are both <= 90, default canonical order is min_lng, min_lat, max_lng, max_lat
+        min_lat, min_lng, max_lat, max_lng = parse_bbox_param(bbox="10.0,20.0,15.0,25.0")
+        self.assertEqual(min_lng, 10.0)
+        self.assertEqual(min_lat, 20.0)
+        self.assertEqual(max_lng, 15.0)
+        self.assertEqual(max_lat, 25.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -82,6 +82,7 @@ class TestApiEdgesStatus(unittest.TestCase):
     def tearDownClass(cls):
         app.dependency_overrides.clear()
         SQLModel.metadata.drop_all(cls.engine)
+        cls.engine.dispose()
 
     def test_get_edges_status_success(self):
         resp = self.client.get("/api/v1/edges/status")

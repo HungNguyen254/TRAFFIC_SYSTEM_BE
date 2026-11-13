@@ -66,6 +66,7 @@ class TestTrafficServiceStatus(unittest.TestCase):
     def tearDown(self):
         self.session.close()
         SQLModel.metadata.drop_all(self.engine)
+        self.engine.dispose()
 
     def test_get_edges_status_all(self):
         response = TrafficService.get_edges_status(
