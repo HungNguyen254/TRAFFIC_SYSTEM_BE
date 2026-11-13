@@ -1,4 +1,10 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+INSECURE_DEFAULT_JWT_SECRETS = {
+    "dev-secret-key-change-in-production-must-be-long-enough",
+    "replace-with-a-secure-random-secret-key-in-production",
+}
 
 
 class Settings(BaseSettings):
@@ -26,6 +32,21 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        env = self.ENVIRONMENT.lower()
+        if env not in {"dev", "test", "development"}:
+            if (
+                self.JWT_SECRET_KEY in INSECURE_DEFAULT_JWT_SECRETS
+                or self.JWT_SECRET_KEY.startswith("dev-secret")
+                or self.JWT_SECRET_KEY.startswith("replace-with")
+                or len(self.JWT_SECRET_KEY) < 32
+            ):
+                raise ValueError(
+                    "JWT_SECRET_KEY must be changed to a secure, random secret in non-dev environments."
+                )
+        return self
 
 
 settings = Settings()

@@ -10,8 +10,11 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.models.edge import Edge
+from app.models.node import Node
 from app.schemas.edge_status import EdgeStatusItem, EdgeStatusResponse, NodeBrief
+from app.schemas.traffic import EdgeCreate, EdgeUpdate
 
 logger = logging.getLogger(__name__)
 LOCAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -191,6 +194,118 @@ class TrafficService:
         return list(session.exec(select(Edge)).all())
 
     @classmethod
+    def list_edges(cls, session: Session, street_name: str | None = None) -> list[Edge]:
+        """Danh sách đoạn đường; lọc theo tên đường nếu có tham số."""
+        if street_name and street_name.strip():
+            return cls.get_edges_by_street(session, street_name)
+        return cls.get_all_edges(session)
+
+    @staticmethod
+    def _ensure_edge_code_available(
+        session: Session, edge_code: str, exclude_edge_id: uuid.UUID | None = None
+    ) -> None:
+        """Chặn trùng edge_code trước khi ghi DB để trả lỗi rõ ràng thay vì IntegrityError."""
+        query = select(Edge).where(Edge.edge_code == edge_code)
+        if exclude_edge_id is not None:
+            query = query.where(Edge.edge_id != exclude_edge_id)
+        if session.exec(query).first():
+            raise BadRequestException(
+                message=f"Mã đoạn đường '{edge_code}' đã tồn tại.",
+                error_code="EDGE_CODE_DUPLICATED",
+                details={"edge_code": edge_code},
+            )
+
+    @staticmethod
+    def _validate_edge_nodes(
+        session: Session,
+        from_node_id: uuid.UUID,
+        to_node_id: uuid.UUID,
+    ) -> None:
+        """Kiểm tra 2 nút giao tồn tại và không trùng nhau."""
+        if from_node_id == to_node_id:
+            raise BadRequestException(
+                message="Nút đầu và nút cuối của đoạn đường phải khác nhau.",
+                error_code="EDGE_SAME_NODE",
+            )
+        missing = [
+            str(node_id)
+            for node_id in (from_node_id, to_node_id)
+            if session.get(Node, node_id) is None
+        ]
+        if missing:
+            raise NotFoundException(
+                message=f"Không tìm thấy nút giao: {', '.join(missing)}",
+                error_code="NODE_NOT_FOUND",
+                details={"node_ids": missing},
+            )
+
+    @classmethod
+    def create_edge(cls, session: Session, payload: EdgeCreate) -> Edge:
+        """Tạo mới một đoạn đường."""
+        cls._ensure_edge_code_available(session, payload.edge_code)
+        cls._validate_edge_nodes(session, payload.from_node_id, payload.to_node_id)
+
+        edge = Edge(**payload.model_dump())
+        session.add(edge)
+        session.commit()
+        session.refresh(edge)
+        return edge
+
+    @classmethod
+    def update_edge(
+        cls, session: Session, edge_id: uuid.UUID, payload: EdgeUpdate
+    ) -> Edge:
+        """Cập nhật thông tin đoạn đường (chỉ các trường được gửi lên)."""
+        edge = cls.get_edge_by_id(session, edge_id)
+        if edge is None:
+            raise NotFoundException(
+                message=f"Không tìm thấy đoạn đường có id {edge_id}.",
+                error_code="EDGE_NOT_FOUND",
+                details={"edge_id": str(edge_id)},
+            )
+
+        updates = payload.model_dump(exclude_unset=True)
+        for field_name, value in updates.items():
+            # geom được phép set null, các cột còn lại là NOT NULL.
+            if value is None and field_name != "geom":
+                raise BadRequestException(
+                    message=f"Trường '{field_name}' không được để trống.",
+                    error_code="EDGE_FIELD_REQUIRED",
+                    details={"field": field_name},
+                )
+
+        new_edge_code = updates.get("edge_code")
+        if new_edge_code is not None:
+            cls._ensure_edge_code_available(session, new_edge_code, exclude_edge_id=edge_id)
+
+        from_node_id = updates.get("from_node_id", edge.from_node_id)
+        to_node_id = updates.get("to_node_id", edge.to_node_id)
+        if "from_node_id" in updates or "to_node_id" in updates:
+            cls._validate_edge_nodes(session, from_node_id, to_node_id)
+
+        for field_name, value in updates.items():
+            setattr(edge, field_name, value)
+
+        session.add(edge)
+        session.commit()
+        session.refresh(edge)
+        return edge
+
+    @classmethod
+    def delete_edge(cls, session: Session, edge_id: uuid.UUID) -> None:
+        """Xoá một đoạn đường."""
+        edge = cls.get_edge_by_id(session, edge_id)
+        if edge is None:
+            raise NotFoundException(
+                message=f"Không tìm thấy đoạn đường có id {edge_id}.",
+                error_code="EDGE_NOT_FOUND",
+                details={"edge_id": str(edge_id)},
+            )
+
+        session.delete(edge)
+        session.commit()
+
+    @classmethod
     def get_edge_traffic_snapshot(cls, edge: Edge, hour_of_day: int, day_of_week: int) -> dict:
         """Tốc độ hiện tại của 1 edge, tính từ dataset CSV lịch sử.
 
@@ -228,8 +343,6 @@ class TrafficService:
 
         lọc theo khung bản đồ (bounding box) hoặc theo khu vực (district/area).
         """
-        from app.models.node import Node
-
         now_utc = datetime.now(UTC)
         now_local = datetime.now(LOCAL_TZ)
         h = hour_of_day if hour_of_day is not None else now_local.hour
@@ -327,8 +440,6 @@ class TrafficService:
         Hỗ trợ lọc theo bbox và district nếu được cung cấp.
         Bổ sung timestamp updated_at.
         """
-        from app.models.node import Node
-
         now_utc = datetime.now(UTC)
         nodes = list(session.exec(select(Node)).all())
         edges = cls.get_all_edges(session)

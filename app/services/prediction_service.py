@@ -227,15 +227,6 @@ class PredictionService:
                 weather=payload.weather,
             )
 
-            cls._save_or_update_prediction(
-                session=session,
-                edge_id=edge.edge_id,
-                hour_of_day=target_hour,
-                predicted_speed=speed,
-                risk_factor=risk,
-                now=now,
-            )
-
             timeline_items.append(
                 PredictionTimelineItem(
                     minutes_ahead=offset,
@@ -249,8 +240,6 @@ class PredictionService:
                     description=desc,
                 )
             )
-
-        session.commit()
 
         return PredictionResponse(
             edge_id=edge.edge_id,

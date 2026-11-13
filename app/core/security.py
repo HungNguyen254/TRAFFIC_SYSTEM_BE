@@ -56,7 +56,13 @@ def get_optional_user(
         user_id = uuid.UUID(payload["sub"])
     except ValueError:
         return None
-    return session.exec(select(User).where(User.user_id == user_id)).first()
+    user = session.exec(select(User).where(User.user_id == user_id)).first()
+    if not user:
+        return None
+    token_version = payload.get("token_version")
+    if token_version is None or token_version != user.token_version:
+        return None
+    return user
 
 
 def get_current_user(
