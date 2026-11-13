@@ -70,7 +70,8 @@ def health_check(request: Request):
     try:
         check_db_connection()
     except (SQLAlchemyError, OSError) as exc:
-        db_status = f"error: {exc}"
+        logger.error("Database health check probe failed: %s", exc)
+        db_status = "disconnected"
 
     return success_response(
         request=request,
