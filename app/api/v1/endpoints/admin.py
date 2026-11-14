@@ -8,6 +8,7 @@ from app.core.response import StandardResponse, success_response
 from app.core.security import get_current_admin
 from app.models.user import User
 from app.services.prediction_service import PredictionService
+from app.services.traffic_service import clear_traffic_data_cache
 from scripts.train_prediction_model import train_model
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ def _run_retraining() -> None:
     try:
         train_model()
         PredictionService.reload_model()
+        clear_traffic_data_cache()
         logger.info("Background model retraining completed successfully.")
     except Exception as exc:  # noqa: BLE001
         logger.error("Background model retraining failed: %s", exc)
