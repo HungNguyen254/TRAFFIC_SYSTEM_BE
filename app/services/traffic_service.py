@@ -1,33 +1,82 @@
-import csv
 import logging
+import threading
 import unicodedata
 import uuid
 from datetime import UTC, datetime
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
+from app.core.database import engine
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.models.edge import Edge
 from app.models.node import Node
+from app.models.traffic_data import TrafficData
 from app.schemas.edge_status import EdgeStatusItem, EdgeStatusResponse, NodeBrief
 from app.schemas.traffic import EdgeCreate, EdgeUpdate
 
 logger = logging.getLogger(__name__)
 LOCAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
+_TRAFFIC_DATA_CACHE: dict[str, list[tuple[int, int, float]]] | None = None
+_TRAFFIC_DATA_LOCK = threading.Lock()
+
+
+def clear_traffic_data_cache() -> None:
+    """Xóa cache dữ liệu giao thông trong bộ nhớ để làm mới từ database."""
+    global _TRAFFIC_DATA_CACHE
+    with _TRAFFIC_DATA_LOCK:
+        _TRAFFIC_DATA_CACHE = None
+
+
+def _load_traffic_data_from_db(
+    session: Session | None = None,
+) -> dict[str, list[tuple[int, int, float]]]:
+    """Đọc dữ liệu lịch sử từ bảng database traffic_data và nhóm theo edge_code.
+
+    Trả về: { edge_code: [(hour_of_day, day_of_week, average_speed), ...] }
+    """
+    global _TRAFFIC_DATA_CACHE
+    if _TRAFFIC_DATA_CACHE is not None:
+        return _TRAFFIC_DATA_CACHE
+
+    with _TRAFFIC_DATA_LOCK:
+        if _TRAFFIC_DATA_CACHE is not None:
+            return _TRAFFIC_DATA_CACHE
+
+        owns_session = session is None
+        db_session = Session(engine) if owns_session else session
+        by_edge: dict[str, list[tuple[int, int, float]]] = {}
+        try:
+            query = select(
+                TrafficData.edge_code,
+                TrafficData.hour_of_day,
+                TrafficData.day_of_week,
+                TrafficData.average_speed,
+            )
+            rows = db_session.exec(query).all()
+            for edge_code, hour, dow, speed in rows:
+                code = (edge_code or "").strip()
+                if code:
+                    by_edge.setdefault(code, []).append((int(hour), int(dow), float(speed)))
+            _TRAFFIC_DATA_CACHE = by_edge
+            logger.info("Đã nạp %d edge từ bảng database traffic_data", len(by_edge))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Lỗi đọc dữ liệu từ bảng traffic_data: %s", exc)
+        finally:
+            if owns_session:
+                db_session.close()
+
+        return _TRAFFIC_DATA_CACHE if _TRAFFIC_DATA_CACHE is not None else {}
+
+
 def strip_accents(value: str) -> str:
     """Bỏ dấu tiếng Việt + lowercase: 'Đường Láng' -> 'duong lang'."""
     normalized = unicodedata.normalize("NFD", value)
     without_marks = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
     return without_marks.replace("đ", "d").replace("Đ", "d").lower()
-
-
-DATA_DIR = Path("data")
-SYNTHETIC_CSV = DATA_DIR / "synthetic_traffic_dataset.csv"
 
 
 def _speed_to_congestion_level(speed_kmh: float) -> int:
@@ -120,49 +169,8 @@ def _is_edge_in_district(from_node: Any, to_node: Any, district: str | None) -> 
     return target in from_dist or target in to_dist
 
 
-@lru_cache(maxsize=1)
-def _load_traffic_csv() -> dict[str, list[tuple[int, int, float]]]:
-    """Đọc dataset CSV 1 lần và nhóm theo edge_code.
-
-    Trả về: { edge_code: [(hour_of_day, day_of_week, average_speed), ...] }
-    """
-    by_edge: dict[str, list[tuple[int, int, float]]] = {}
-    if not SYNTHETIC_CSV.exists():
-        logger.warning("Không tìm thấy file %s - bản đồ sẽ dùng tốc độ mặc định.", SYNTHETIC_CSV)
-        return by_edge
-
-    try:
-        with SYNTHETIC_CSV.open(mode="r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                code = (row.get("edge_code") or "").strip()
-                speed_raw = (row.get("average_speed") or "").strip()
-                if not code or not speed_raw:
-                    continue
-                try:
-                    hour = int(row["hour_of_day"])
-                    dow = int(row["day_of_week"])
-                    speed = float(speed_raw)
-                except (KeyError, ValueError):
-                    continue
-                by_edge.setdefault(code, []).append((hour, dow, speed))
-        logger.info("Đã nạp %d edge từ dataset CSV %s", len(by_edge), SYNTHETIC_CSV.name)
-    except OSError as exc:
-        logger.error("Lỗi đọc dataset CSV %s: %s", SYNTHETIC_CSV, exc)
-    return by_edge
-
-
-def _averages_by_hour(records: list[tuple[int, int, float]]) -> dict[int, float]:
-    """Trung bình tốc độ theo từng giờ (gộp cả thứ trong tuần)."""
-    sums: dict[int, tuple[float, int]] = {}
-    for hour, _dow, speed in records:
-        total, count = sums.get(hour, (0.0, 0))
-        sums[hour] = (total + speed, count + 1)
-    return {hour: total / count for hour, (total, count) in sums.items()}
-
-
 class TrafficService:
-    """Truy vấn dữ liệu lưới đường (nodes/edges) + dataset CSV."""
+    """Truy vấn dữ liệu lưới đường (nodes/edges) + dữ liệu traffic từ database."""
 
     @staticmethod
     def get_edges_by_street(session: Session, street_name: str) -> list[Edge]:
@@ -306,15 +314,20 @@ class TrafficService:
         session.commit()
 
     @classmethod
-    def get_edge_traffic_snapshot(cls, edge: Edge, hour_of_day: int, day_of_week: int) -> dict:
-        """Tốc độ hiện tại của 1 edge, tính từ dataset CSV lịch sử.
+    def get_edge_traffic_snapshot(
+        cls,
+        edge: Edge,
+        hour_of_day: int,
+        day_of_week: int,
+        session: Session | None = None,
+    ) -> dict:
+        """Tốc độ hiện tại của 1 edge, tính từ bảng database traffic_data.
 
         Ưu tiên đúng (hour, day_of_week); nếu thiếu thì gộp theo giờ.
-        Day_of_week dùng quy ước của dataset generate_synthetic_traffic.py:
-        0 = thứ 2 ... 6 = chủ nhật (giống weekday() của Python).
+        Day_of_week: 0 = thứ 2 ... 6 = chủ nhật.
         """
         default_speed = float(edge.max_speed_limit) * 0.7
-        records = _load_traffic_csv().get(edge.edge_code, [])
+        records = _load_traffic_data_from_db(session).get(edge.edge_code, [])
 
         exact = [s for h, d, s in records if h == hour_of_day and d == day_of_week]
         pool = exact or [s for h, _d, s in records if h == hour_of_day]
@@ -363,7 +376,7 @@ class TrafficService:
             if not _is_edge_in_district(from_node, to_node, district):
                 continue
 
-            snapshot = cls.get_edge_traffic_snapshot(e, h, d)
+            snapshot = cls.get_edge_traffic_snapshot(e, h, d, session=session)
             congestion_level = snapshot["congestion_level"]
 
             node_from_brief = (
@@ -458,7 +471,7 @@ class TrafficService:
             if not _is_edge_in_district(from_node, to_node, district):
                 continue
 
-            snapshot = cls.get_edge_traffic_snapshot(e, hour_of_day, day_of_week)
+            snapshot = cls.get_edge_traffic_snapshot(e, hour_of_day, day_of_week, session=session)
             if from_node:
                 matched_node_ids.add(from_node.node_id)
             if to_node:

@@ -1,3 +1,4 @@
+import io
 import logging
 import threading
 import uuid
@@ -10,7 +11,9 @@ import numpy as np
 from fastapi import HTTPException, status
 from sqlmodel import Session, select
 
+from app.core.database import engine
 from app.models.edge import Edge
+from app.models.ml_model import MLModel
 from app.models.prediction import Prediction
 from app.schemas.prediction import (
     PredictionRequest,
@@ -20,7 +23,6 @@ from app.schemas.prediction import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = Path("app/core/model.joblib")
 LOCAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
@@ -29,21 +31,47 @@ class PredictionService:
     _lock = threading.Lock()
 
     @classmethod
-    def load_model(cls) -> None:
-        if MODEL_PATH.exists():
+    def load_model(cls, session: Session | None = None) -> None:
+        owns_session = session is None
+        db_session = Session(engine) if owns_session else session
+        try:
             try:
-                cls._model = joblib.load(MODEL_PATH)
-                logger.info("Successfully loaded ML prediction model from %s", MODEL_PATH)
-            except Exception as e:  # noqa: BLE001
+                statement = (
+                    select(MLModel)
+                    .where(MLModel.model_name == "traffic_speed_rf", MLModel.is_active == True)
+                    .order_by(MLModel.version.desc())
+                )
+                db_model = db_session.exec(statement).first()
+            except Exception as db_err:  # noqa: BLE001
                 logger.warning(
-                    "Failed to load model file %s: %s. Using heuristic fallback.", MODEL_PATH, e
+                    "Database query error while loading ML model: %s. Preserving existing model state.",
+                    db_err,
+                )
+                return
+
+            if db_model and db_model.model_bytes:
+                try:
+                    new_model = joblib.load(io.BytesIO(db_model.model_bytes))
+                    cls._model = new_model
+                    logger.info(
+                        "Successfully loaded ML model '%s' v%d from database",
+                        db_model.model_name,
+                        db_model.version,
+                    )
+                except Exception as deser_err:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to deserialize ML model bytes from database: %s. Using heuristic fallback.",
+                        deser_err,
+                    )
+                    cls._model = None
+            else:
+                logger.info(
+                    "No active ML model found in database. Using heuristic fallback."
                 )
                 cls._model = None
-        else:
-            logger.info(
-                "Model file %s not found. Will use heuristic fallback until retrained.", MODEL_PATH
-            )
-            cls._model = None
+        finally:
+            if owns_session:
+                db_session.close()
 
     @classmethod
     def reload_model(cls) -> None:
@@ -71,7 +99,8 @@ class PredictionService:
         is_rush_hour = 1.0 if (7 <= hour_of_day <= 9 or 17 <= hour_of_day <= 19) else 0.0
         weather_code = cls._weather_to_code(weather)
 
-        if cls._model is not None:
+        model = cls._model
+        if model is not None:
             features = np.array(
                 [
                     [
@@ -86,7 +115,7 @@ class PredictionService:
                 ],
                 dtype=np.float32,
             )
-            predicted_speed = float(cls._model.predict(features)[0])
+            predicted_speed = float(model.predict(features)[0])
         else:
             # Heuristic fallback
             factor = 0.85
