@@ -901,17 +901,3 @@ Dự án sở hữu bộ kiểm thử tự động toàn diện bao quát các m
 # Chạy toàn bộ 30 bài kiểm thử với pytest qua uv
 uv run --with pytest python -m pytest -v
 ```
-
-### Danh sách các kịch bản kiểm thử:
-- `tests/test_admin_retrain_e2e.py`: Kiểm thử luồng E2E gọi API Admin retrain model chạy ngầm.
-- `tests/test_auth_token_revocation.py`: Kiểm thử cơ chế vô hiệu hóa Access Token tức thì khi đổi mật khẩu qua `token_version`.
-- `tests/test_config_security.py`: Kiểm tra cơ chế tự động từ chối cấu hình insecure JWT secret trên production.
-- `tests/test_db_models.py`: Kiểm tra schema, ràng buộc khóa ngoại CASCADE và tính toàn vẹn của các thực thể SQLModel.
-- `tests/test_health_disclosure.py`: Đảm bảo health check không làm rò rỉ thông tin nhạy cảm của hệ thống.
-- `tests/test_import_csv.py`: Kiểm thử script import dữ liệu CSV theo batch và truncate table.
-- `tests/test_prediction_security.py`: Validate chặt chẽ dữ liệu đầu vào của API dự báo (giới hạn minutes_ahead).
-- `tests/test_prediction_service_db.py`: Kiểm thử nạp model từ database và cơ chế heuristic fallback khi DB chưa có model.
-- `tests/test_routing_cache.py`: Kiểm thử bộ nhớ đệm đồ thị NetworkX theo TTL.
-- `tests/test_security_jwt.py`: Kiểm thử mã hóa và giải mã JWT token roundtrip.
-- `tests/test_traffic_service_db.py`: Kiểm tra tính toán snapshot trạng thái giao thông trực tiếp từ bảng `traffic_data`.
-- `tests/test_train_prediction_model.py`: Kiểm thử huấn luyện mô hình và lưu BLOB vào `ml_models`.
