@@ -8,7 +8,6 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
     PublicFormat,
-    load_pem_public_key,
 )
 
 from app.core.config import settings
@@ -22,6 +21,23 @@ def generate_salt(length: int = 16) -> str:
 def generate_x25519_keypair() -> tuple[x25519.X25519PrivateKey, str]:
     """Generate an X25519 private key and its raw base64 public key."""
     private_key = x25519.X25519PrivateKey.generate()
+    public_bytes = private_key.public_key().public_bytes(
+        encoding=Encoding.Raw,
+        format=PublicFormat.Raw,
+    )
+    public_key_b64 = base64.b64encode(public_bytes).decode("utf-8")
+    return private_key, public_key_b64
+
+
+def get_server_x25519_keypair() -> tuple[x25519.X25519PrivateKey, str]:
+    """Deterministically derive server X25519 keypair from settings.JWT_SECRET_KEY."""
+    seed = derive_key_hkdf(
+        shared_secret=settings.JWT_SECRET_KEY.encode("utf-8"),
+        salt=b"traffic-server-x25519-salt",
+        info=b"server-x25519-keypair",
+        length=32,
+    )
+    private_key = x25519.X25519PrivateKey.from_private_bytes(seed)
     public_bytes = private_key.public_key().public_bytes(
         encoding=Encoding.Raw,
         format=PublicFormat.Raw,
