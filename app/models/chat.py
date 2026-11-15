@@ -34,6 +34,10 @@ class ChatSession(SQLModel, table=True):
 
 class ChatMessage(SQLModel, table=True):
     __tablename__ = "chat_messages"
+    __table_args__ = (
+        sa.UniqueConstraint("session_id", "nonce", name="uq_chat_messages_session_nonce"),
+        sa.Index("ix_chat_messages_session_created", "session_id", "created_at"),
+    )
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,

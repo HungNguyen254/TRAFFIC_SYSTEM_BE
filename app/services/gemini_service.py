@@ -30,7 +30,11 @@ class GeminiService:
                 detail="GEMINI_API_KEY chưa được cấu hình. Vui lòng thêm GEMINI_API_KEY vào biến môi trường hoặc .env.",
             )
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key,
+        }
         
         payload: dict = {"contents": contents}
         if system_instruction:
@@ -40,7 +44,7 @@ class GeminiService:
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, json=payload)
+                response = await client.post(url, json=payload, headers=headers)
         except httpx.RequestError as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,

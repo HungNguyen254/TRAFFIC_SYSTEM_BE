@@ -227,3 +227,68 @@ def test_cross_user_isolation(client: TestClient, auth_headers, db_session: Sess
     assert client.get(f"/api/v1/chat/sessions/{alice_session_id}/messages", headers=headers_bob).status_code == 404
     assert client.delete(f"/api/v1/chat/sessions/{alice_session_id}", headers=headers_bob).status_code == 404
     assert client.patch(f"/api/v1/chat/sessions/{alice_session_id}", json={}, headers=headers_bob).status_code == 404
+
+
+def test_nonce_reuse_and_tampered_ciphertext_and_isolation(client: TestClient, auth_headers, monkeypatch, db_session: Session):
+    headers, user = auth_headers
+
+    salt_resp = client.get("/api/v1/chat/user-salt", headers=headers).json()["data"]
+    client_priv, client_pub = generate_x25519_keypair()
+    shared_secret = derive_shared_secret(client_priv, salt_resp["server_public_key"])
+    k_session = derive_key_hkdf(shared_secret, salt=b"traffic-chat-session", info=b"session-symmetric-key", length=32)
+
+    handshake_resp = client.post(
+        "/api/v1/chat/handshake",
+        json={
+            "client_public_key": client_pub,
+            "session_key_enc_user": "dummy_enc",
+            "session_key_nonce_user": "dummy_nonce",
+        },
+        headers=headers,
+    )
+    session_id = handshake_resp.json()["data"]["session_id"]
+
+    async def mock_ai(self, contents, system_instruction=None):
+        return "AI reply"
+
+    monkeypatch.setattr(GeminiService, "generate_response", mock_ai)
+
+    ct, nonce = encrypt_aes_gcm(k_session, json.dumps({"content": "First msg"}).encode("utf-8"))
+
+    # 1. Send first message -> 200
+    res1 = client.post("/api/v1/chat/message", json={"session_id": session_id, "ciphertext": ct, "nonce": nonce}, headers=headers)
+    assert res1.status_code == 200
+
+    # 2. Replay/Reuse same nonce -> MUST FAIL 400
+    res_reuse = client.post("/api/v1/chat/message", json={"session_id": session_id, "ciphertext": ct, "nonce": nonce}, headers=headers)
+    assert res_reuse.status_code == 400
+    assert "Nonce" in res_reuse.json()["message"]
+
+    # 3. Tampered ciphertext -> MUST FAIL 400
+    import base64
+    raw_ct = bytearray(base64.b64decode(ct))
+    raw_ct[0] ^= 0xFF
+    bad_ct = base64.b64encode(raw_ct).decode("utf-8")
+    new_nonce = base64.b64encode(b"0" * 12).decode("utf-8")
+    res_tamper = client.post("/api/v1/chat/message", json={"session_id": session_id, "ciphertext": bad_ct, "nonce": new_nonce}, headers=headers)
+    assert res_tamper.status_code == 400
+
+    # 4. User B tries to post message to Alice's session -> MUST FAIL 404
+    user_b = User(
+        email="bob_attacker@example.com",
+        password_hash=hash_password("Pass123!"),
+        full_name="Bob Attacker",
+        role="user",
+        token_version=1,
+    )
+    db_session.add(user_b)
+    db_session.commit()
+    db_session.refresh(user_b)
+    token_bob = create_access_token({"sub": str(user_b.user_id), "token_version": user_b.token_version})
+    res_bob_post = client.post("/api/v1/chat/message", json={"session_id": session_id, "ciphertext": ct, "nonce": new_nonce}, headers={"Authorization": f"Bearer {token_bob}"})
+    assert res_bob_post.status_code == 404
+
+    # 5. Non-dict payload (e.g. JSON array) -> MUST FAIL 400
+    array_ct, array_nonce = encrypt_aes_gcm(k_session, json.dumps(["invalid", "payload"]).encode("utf-8"))
+    res_array = client.post("/api/v1/chat/message", json={"session_id": session_id, "ciphertext": array_ct, "nonce": array_nonce}, headers=headers)
+    assert res_array.status_code == 400

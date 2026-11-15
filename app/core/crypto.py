@@ -29,10 +29,15 @@ def generate_x25519_keypair() -> tuple[x25519.X25519PrivateKey, str]:
     return private_key, public_key_b64
 
 
+def _get_chat_secret_seed() -> bytes:
+    key_str = settings.CHAT_MASTER_KEY or settings.JWT_SECRET_KEY
+    return key_str.encode("utf-8")
+
+
 def get_server_x25519_keypair() -> tuple[x25519.X25519PrivateKey, str]:
-    """Deterministically derive server X25519 keypair from settings.JWT_SECRET_KEY."""
+    """Deterministically derive server X25519 keypair from chat secret seed."""
     seed = derive_key_hkdf(
-        shared_secret=settings.JWT_SECRET_KEY.encode("utf-8"),
+        shared_secret=_get_chat_secret_seed(),
         salt=b"traffic-server-x25519-salt",
         info=b"server-x25519-keypair",
         length=32,
@@ -102,9 +107,9 @@ def decrypt_aes_gcm(key: bytes, ciphertext_b64: str, nonce_b64: str) -> bytes:
 
 
 def _get_server_master_key() -> bytes:
-    """Derive a 256-bit server key from settings.JWT_SECRET_KEY."""
+    """Derive a 256-bit server key from chat secret seed."""
     return derive_key_hkdf(
-        shared_secret=settings.JWT_SECRET_KEY.encode("utf-8"),
+        shared_secret=_get_chat_secret_seed(),
         salt=b"traffic-server-master-salt",
         info=b"server-secret-envelope",
         length=32,

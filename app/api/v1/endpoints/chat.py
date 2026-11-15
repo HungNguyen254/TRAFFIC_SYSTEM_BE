@@ -1,3 +1,4 @@
+import base64
 import json
 import uuid
 from datetime import UTC, datetime
@@ -18,6 +19,7 @@ from app.core.crypto import (
     get_server_x25519_keypair,
 )
 from app.core.database import SessionDep
+from app.core.limiter import limiter
 from app.core.response import StandardResponse, success_response
 from app.core.security import get_current_user
 from app.models.chat import ChatMessage, ChatSession
@@ -42,6 +44,7 @@ router = APIRouter(prefix="/chat", tags=["Chatbot AI E2E"])
     response_model=StandardResponse[UserSaltResponse],
     summary="Lấy User Salt và Public Key của máy chủ",
 )
+@limiter.limit("60/minute")
 def get_user_salt(
     request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
@@ -70,6 +73,7 @@ def get_user_salt(
     response_model=StandardResponse[HandshakeResponse],
     summary="Khởi tạo phiên chat và bắt tay trao đổi khóa ECDH",
 )
+@limiter.limit("20/minute")
 def handshake(
     request: Request,
     body: HandshakeRequest,
@@ -125,11 +129,13 @@ def handshake(
     response_model=StandardResponse[MessageResponse],
     summary="Gửi tin nhắn mã hóa và nhận phản hồi từ Gemini AI",
 )
+@limiter.limit("30/minute")
 async def send_message(
     request: Request,
     body: SendMessageRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     session: SessionDep,
+    gemini_service: Annotated[GeminiService, Depends(GeminiService)],
 ) -> StandardResponse[MessageResponse]:
     """Giải mã tin nhắn trong RAM, gọi Gemini API đa lượt, mã hóa câu trả lời và lưu trữ dạng ciphertext."""
     chat_session = session.exec(
@@ -145,6 +151,30 @@ async def send_message(
             detail="Phiên chat không tồn tại hoặc bạn không có quyền truy cập.",
         )
 
+    # Validate nonce length (must be 12 bytes)
+    try:
+        raw_nonce = base64.b64decode(body.nonce)
+        if len(raw_nonce) != 12:
+            raise ValueError("Nonce phải có độ dài 12 bytes")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Nonce không hợp lệ: {str(exc)}",
+        ) from exc
+
+    # Check for nonce reuse in this session to prevent replay and GCM attacks
+    existing_nonce = session.exec(
+        select(ChatMessage).where(
+            ChatMessage.session_id == chat_session.id,
+            ChatMessage.nonce == body.nonce,
+        )
+    ).first()
+    if existing_nonce:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nonce đã được sử dụng. Mỗi tin nhắn phải có một nonce ngẫu nhiên duy nhất.",
+        )
+
     # Giải mã K_session trong RAM
     k_session = decrypt_server_secret(
         chat_session.session_key_enc_server,
@@ -155,22 +185,27 @@ async def send_message(
     try:
         user_pt_bytes = decrypt_aes_gcm(k_session, body.ciphertext, body.nonce)
         user_payload = json.loads(user_pt_bytes.decode("utf-8"))
-        user_content = user_payload.get("content", "")
+        if not isinstance(user_payload, dict) or "content" not in user_payload or not isinstance(user_payload["content"], str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payload giải mã phải là JSON object chứa trường 'content' kiểu chuỗi.",
+            )
+        user_content = user_payload["content"]
+    except HTTPException:
+        raise
     except (InvalidTag, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Không thể giải mã tin nhắn: Dữ liệu bị hỏng hoặc sai khóa (InvalidTag).",
         ) from exc
 
-    # Lưu tin nhắn người dùng (chỉ lưu ciphertext + nonce vào DB)
+    # Chuẩn bị tin nhắn người dùng (chưa commit ngay để bảo toàn tính nguyên tử nếu Gemini lỗi)
     user_msg = ChatMessage(
         session_id=chat_session.id,
         role="user",
         ciphertext=body.ciphertext,
         nonce=body.nonce,
     )
-    session.add(user_msg)
-    session.commit()
 
     # Nạp lịch sử các lượt hội thoại gần nhất (tối đa 10 tin nhắn) để giữ context cho Gemini
     past_messages = session.exec(
@@ -191,11 +226,14 @@ async def send_message(
         except Exception:
             continue
 
-    if not contents:
-        contents = [{"role": "user", "parts": [{"text": user_content}]}]
+    # Đảm bảo lịch sử luôn bắt đầu bằng role 'user' (quy định của Gemini)
+    while contents and contents[0]["role"] != "user":
+        contents.pop(0)
+
+    # Thêm câu hỏi hiện tại
+    contents.append({"role": "user", "parts": [{"text": user_content}]})
 
     # Gọi Google Gemini API
-    gemini_service = GeminiService()
     system_instruction = (
         "Bạn là trợ lý AI thông minh, nhiệt tình và thân thiện. "
         "Hãy phản hồi ngắn gọn, rõ ràng và hữu ích bằng tiếng Việt."
@@ -213,7 +251,7 @@ async def send_message(
     reply_pt_bytes = json.dumps(reply_payload).encode("utf-8")
     reply_ct, reply_nonce = encrypt_aes_gcm(k_session, reply_pt_bytes)
 
-    # Lưu phản hồi AI vào DB (chỉ lưu ciphertext + nonce)
+    # Lưu cả tin nhắn người dùng và phản hồi AI vào DB trong một giao dịch nguyên tử
     ai_msg = ChatMessage(
         session_id=chat_session.id,
         role="model",
@@ -221,6 +259,7 @@ async def send_message(
         nonce=reply_nonce,
     )
     chat_session.updated_at = datetime.now(UTC)
+    session.add(user_msg)
     session.add(ai_msg)
     session.add(chat_session)
     session.commit()
@@ -241,6 +280,7 @@ async def send_message(
     response_model=StandardResponse[list[ChatSessionItem]],
     summary="Lấy danh sách các phiên chat của người dùng",
 )
+@limiter.limit("60/minute")
 def list_sessions(
     request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
@@ -278,6 +318,7 @@ def list_sessions(
     response_model=StandardResponse[ChatSessionItem],
     summary="Cập nhật tiêu đề mã hóa của phiên chat",
 )
+@limiter.limit("30/minute")
 def update_session_title(
     request: Request,
     session_id: uuid.UUID,
@@ -327,6 +368,7 @@ def update_session_title(
     response_model=StandardResponse[list[ChatMessageItem]],
     summary="Lấy lịch sử tin nhắn mã hóa của phiên chat",
 )
+@limiter.limit("60/minute")
 def get_session_messages(
     request: Request,
     session_id: uuid.UUID,
@@ -377,6 +419,7 @@ def get_session_messages(
     response_model=StandardResponse[dict],
     summary="Xóa phiên chat",
 )
+@limiter.limit("20/minute")
 def delete_session(
     request: Request,
     session_id: uuid.UUID,
