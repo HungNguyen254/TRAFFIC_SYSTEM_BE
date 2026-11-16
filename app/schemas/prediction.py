@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -44,3 +44,25 @@ class PredictionResponse(BaseModel):
     weather: str
     timeline: list[PredictionTimelineItem]
     updated_at: datetime
+
+
+class MapForecastRequest(BaseModel):
+    minutes_ahead: Literal[30, 60]
+    weather: str = "sunny"
+
+
+class MapForecastEdge(BaseModel):
+    edge_id: uuid.UUID
+    street_name: str
+    max_speed_limit: int
+    predicted_speed: float
+    risk_factor: float
+    congestion_level: int = Field(ge=1, le=4)
+    description: str
+
+
+class MapForecastResponse(BaseModel):
+    minutes_ahead: int
+    base_time: datetime
+    target_time: datetime
+    edges: list[MapForecastEdge]
