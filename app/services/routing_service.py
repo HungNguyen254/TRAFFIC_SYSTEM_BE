@@ -1,7 +1,9 @@
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from itertools import pairwise
+from zoneinfo import ZoneInfo
 
 import networkx as nx
 from sqlmodel import Session, select
@@ -9,9 +11,12 @@ from sqlmodel import Session, select
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.models.edge import Edge
 from app.models.node import Node
-from app.schemas.routing import RouteResult, RouteStep, WeightMode
+from app.schemas.routing import RouteResult, RouteStep, SpeedSource, WeightMode
+from app.services.prediction_service import PredictionService
+from app.services.traffic_service import TrafficService
 
 MIN_SPEED_KMH = 1.0
+LOCAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 GRAPH_CACHE_TTL_SECONDS = 300.0
 _GRAPH_CACHE: dict[WeightMode, tuple[float, "TrafficGraph"]] = {}
 
@@ -180,3 +185,30 @@ def find_route(
         total_distance_km=total_distance_km,
         total_duration_min=total_duration_min,
     )
+
+
+def apply_speed_source(
+    session: Session, route: RouteResult, speed_source: SpeedSource
+) -> None:
+    """Tính lại ETA từng đoạn theo tốc độ hiện tại hoặc dự báo thay vì giới hạn cố định."""
+    if speed_source == "limit":
+        return
+
+    now_local = datetime.now(LOCAL_TZ)
+    for step in route.steps:
+        edge = session.get(Edge, step.edge_id)
+        if speed_source == "current":
+            speed = TrafficService.get_edge_traffic_snapshot(
+                edge, now_local.hour, now_local.weekday(), session=session
+            )["speed"]
+        else:
+            speed, _risk, _level, _desc = PredictionService._compute_prediction_values(
+                edge=edge,
+                hour_of_day=now_local.hour,
+                day_of_week=now_local.weekday(),
+            )
+        speed = max(MIN_SPEED_KMH, min(speed, float(edge.max_speed_limit)))
+        step.speed_kmh = speed
+        step.travel_min = round(step.length_km / speed * 60, 2)
+
+    route.total_duration_min = round(sum(step.travel_min for step in route.steps), 2)
