@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 WeightMode = Literal["distance", "duration"]
+SpeedSource = Literal["limit", "current", "forecast"]
 
 
 class RouteStep(BaseModel):
