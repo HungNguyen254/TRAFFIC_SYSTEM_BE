@@ -41,7 +41,9 @@ class AuthService:
                 detail="Email hoặc mật khẩu không chính xác.",
             )
 
-        token = create_access_token(data={"sub": str(user.user_id), "role": user.role})
+        token = create_access_token(
+            data={"sub": str(user.user_id), "role": user.role, "token_version": user.token_version}
+        )
         return TokenResponse(
             access_token=token,
             role=user.role,
@@ -59,5 +61,6 @@ class AuthService:
             )
 
         user.password_hash = hash_password(payload.new_password)
+        user.token_version += 1
         session.add(user)
         session.commit()
