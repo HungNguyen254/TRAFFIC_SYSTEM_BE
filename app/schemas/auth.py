@@ -17,6 +17,7 @@ def validate_password_strength(password: str) -> str:
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
+    confirm_password: str = Field(min_length=6)
     full_name: str = Field(min_length=1, max_length=100)
 
     @field_validator("password")
