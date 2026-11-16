@@ -1,29 +1,37 @@
 # 🚦 Traffic System Backend (BE)
 
-Hệ thống API Backend thông minh phục vụ **giám sát thời gian thực**, **định tuyến tìm đường tối ưu** và **dự báo tình trạng ùn tắc giao thông tương lai**. Được xây dựng trên nền tảng **FastAPI**, **SQLModel / SQLAlchemy**, **NetworkX** và **Scikit-learn**.
+Hệ thống API Backend thông minh phục vụ **giám sát thời gian thực**, **định tuyến tìm đường tối ưu**, **dự báo tình trạng ùn tắc giao thông tương lai** và **Trợ lý Chatbot AI thông minh với mã hóa đầu cuối (E2E Encrypted AI Chatbot)**. Được xây dựng trên nền tảng **FastAPI**, **SQLModel / SQLAlchemy 2.0**, **NetworkX**, **Scikit-learn**, **Google Gemini API** và thư viện mật mã **Cryptography (ECDH X25519 + AES-256-GCM)**.
 
 ---
 
 ## 📑 Mục lục
 - [1. Tổng quan kiến trúc hệ thống](#1-tổng-quan-kiến-trúc-hệ-thống)
 - [2. Sơ đồ cơ sở dữ liệu (Database Schema & ERD)](#2-sơ-đồ-cơ-sở-dữ-liệu-database-schema--erd)
+  - [2.1. Sơ đồ thực thể quan hệ (ERD)](#21-sơ-đồ-thực-thể-quan-hệ-erd)
+  - [2.2. Điểm kiến trúc cốt lõi của Database](#22-điểm-kiến-trúc-cốt-lõi-của-database)
 - [3. Hướng dẫn cài đặt & Khởi chạy](#3-hướng-dẫn-cài-đặt--khởi-chạy)
 - [4. Cấu trúc thư mục dự án](#4-cấu-trúc-thư-mục-dự-án)
 - [5. Chuẩn hóa API & Envelope Response](#5-chuẩn-hóa-api--envelope-response)
 - [6. Danh mục API chi tiết (Endpoints Reference)](#6-danh-mục-api-chi-tiết-endpoints-reference)
+  - [Bảng tóm tắt các Endpoints](#bảng-tóm-tắt-các-endpoints)
   - [Hệ thống & Health Check](#hệ-thống--health-check)
   - [Xác thực & Phân quyền (Auth & RBAC)](#xác-thực--phân-quyền-auth--rbac)
   - [Giám sát & Quản lý cung đường (Edges & Traffic Status)](#giám-sát--quản-lý-cung-đường-edges--traffic-status)
   - [Tìm đường thông minh (Directions & Routing)](#tìm-đường-thông-minh-directions--routing)
   - [Dự báo giao thông AI (Predictions & Forecast)](#dự-báo-giao-thông-ai-predictions--forecast)
+  - [Trợ lý Chatbot AI Mã hóa E2E (Chatbot AI & Gemini)](#trợ-lý-chatbot-ai-mã-hóa-e2e-chatbot-ai--gemini)
   - [Quản trị viên (Admin Tasks)](#quản-trị-viên-admin-tasks)
 - [7. Luồng nghiệp vụ & Cơ chế xử lý chi tiết (Business Flows)](#7-luồng-nghiệp-vụ--cơ-chế-xử-lý-chi-tiết-business-flows)
-  - [Luồng 1: Xác thực JWT & Thu hồi Token tức thì](#luồng-1-xác-thực-jwt--thu-hồi-token-tức-thì-token-revocation)
+  - [Luồng 1: Xác thực JWT & Thu hồi Token tức thì (Token Revocation)](#luồng-1-xác-thực-jwt--thu-hồi-token-tức-thì-token-revocation)
   - [Luồng 2: Giám sát trạng thái đường (Bounding Box & District Filter)](#luồng-2-giám-sát-trạng-thái-đường-bounding-box--district-filter)
   - [Luồng 3: Tìm đường tối ưu (Dijkstra trên NetworkX & Graph Cache)](#luồng-3-tìm-đường-tối-ưu-dijkstra-trên-networkx--graph-cache)
   - [Luồng 4: Dự báo giao thông AI & Heuristic Fallback](#luồng-4-dự-báo-giao-thông-ai--heuristic-fallback)
   - [Luồng 5: Huấn luyện lại mô hình trong tiến trình ngầm (Background Task)](#luồng-5-huấn-luyện-lại-mô-hình-trong-tiến-trình-ngầm-background-task)
-- [8. Bảo mật & Giới hạn tần suất (Rate Limiting)](#8-bảo-mật--giới-hạn-tần-suất-rate-limiting)
+  - [Luồng 6: Trò chuyện AI với Mã hóa E2E & Đồng bộ Đa thiết bị (Dual-Envelope Key Agreement)](#luồng-6-trò-chuyện-ai-với-mã-hóa-e2e--đồng-bộ-đa-thiết-bị-dual-envelope-key-agreement)
+- [8. Bảo mật & Giới hạn tần suất (Rate Limiting & Cryptography)](#8-bảo-mật--giới-hạn-tần-suất-rate-limiting--cryptography)
+  - [8.1. Ma trận giới hạn tần suất (SlowAPI)](#81-ma-trận-giới-hạn-tần-suất-slowapi)
+  - [8.2. Kiến trúc Mật mã Đầu Cuối (E2E Cryptography) & Zero-Knowledge Storage](#82-kiến-trúc-mật-mã-đầu-cuối-e2e-cryptography--zero-knowledge-storage)
+  - [8.3. Các cơ chế bảo mật bổ sung](#83-các-cơ-chế-bảo-mật-bổ-sung)
 - [9. Các Scripts tiện ích (CLI Utilities)](#9-các-scripts-tiện-ích-cli-utilities)
 - [10. Kiểm thử tự động (Testing)](#10-kiểm-thử-tự-động-testing)
 
@@ -35,39 +43,45 @@ Hệ thống được thiết kế theo mô hình phân lớp hiện đại (**L
 
 ```mermaid
 flowchart TD
-    Client["Client (Frontend / Mobile / Postman)"] --> RateLimiter["SlowAPI Rate Limiter"]
+    Client["Client (Web App / Mobile / Postman / CLI Demo)"] --> RateLimiter["SlowAPI Rate Limiter"]
     RateLimiter --> CORSMiddleware["CORS Middleware"]
     CORSMiddleware --> ExceptionHandler["Global Exception Handlers"]
     
     subgraph APILayer ["API Layer (FastAPI Routers)"]
-        R_Auth["/api/v1/auth"]
-        R_Edges["/api/v1/edges"]
-        R_Directions["/api/v1/directions"]
-        R_Predictions["/api/v1/predictions"]
-        R_Admin["/api/v1/admin"]
+        R_Auth["/api/v1/auth\n(Register, Login, Me, Change Password)"]
+        R_Edges["/api/v1/edges\n(Realtime Status, BBox, CRUD)"]
+        R_Directions["/api/v1/directions\n(Shortest & Fastest Dijkstra)"]
+        R_Predictions["/api/v1/predictions\n(Timeline Traffic Forecast)"]
+        R_Chat["/api/v1/chat\n(E2E Encrypted AI Chatbot)"]
+        R_Admin["/api/v1/admin\n(Background ML Retraining)"]
         R_System["/api/health & /api/data"]
     end
     ExceptionHandler --> APILayer
 
-    subgraph ServiceLayer ["Service Layer (Business Logic)"]
+    subgraph ServiceAndCoreLayer ["Service & Core Components"]
         S_Auth["AuthService\n(Argon2, JWT, Token Versioning)"]
         S_Traffic["TrafficService\n(Traffic DB Cache, BBox, District Matcher)"]
         S_Routing["RoutingService\n(NetworkX Graph, Dijkstra Routing)"]
         S_Predict["PredictionService\n(RandomForest, Timeline, Fallback)"]
+        S_Gemini["GeminiService\n(Multi-turn AI Assistant via REST API)"]
+        C_Crypto["Crypto Engine\n(ECDH X25519, AES-256-GCM, PBKDF2, HKDF)"]
     end
     
     R_Auth --> S_Auth
     R_Edges --> S_Traffic
     R_Directions --> S_Routing
     R_Predictions --> S_Predict
+    R_Chat --> C_Crypto
+    R_Chat --> S_Gemini
     R_Admin --> S_Predict
     R_Admin --> S_Traffic
 
-    subgraph DataAndAILayer ["Storage & In-Memory Engines"]
+    subgraph StorageAndExternal ["Storage & External Engines"]
         DB[("Database\n(PostgreSQL Supabase / SQLite)")]
         TrafficCache[("In-Memory Traffic Cache\n(Thread-Safe Lock)")]
         GraphCache[("In-Memory Graph Cache\n(TTL 300s)")]
         MLMemory[("In-Memory ML Model\n(joblib deserialized)")]
+        Ext_Gemini[("Google Gemini 2.5 Flash\n(Google GenAI REST API)")]
     end
 
     S_Auth <--> DB
@@ -77,13 +91,15 @@ flowchart TD
     S_Routing <--> GraphCache
     S_Predict <--> DB
     S_Predict <--> MLMemory
+    R_Chat <--> DB
+    S_Gemini <--> Ext_Gemini
 ```
 
 ---
 
 ## 2. Sơ đồ cơ sở dữ liệu (Database Schema & ERD)
 
-Hệ thống sử dụng **SQLModel** (xây dựng trên SQLAlchemy 2.0). Dữ liệu hỗ trợ cả **SQLite** (cho môi trường kiểm thử/dev) và **PostgreSQL / Supabase** (môi trường production).
+Hệ thống sử dụng **SQLModel** (xây dựng trên SQLAlchemy 2.0). Dữ liệu hỗ trợ linh hoạt cả **SQLite** (cho môi trường local dev/kiểm thử tự động) và **PostgreSQL / Supabase** (môi trường production).
 
 ### 2.1. Sơ đồ thực thể quan hệ (ERD)
 
@@ -92,6 +108,8 @@ erDiagram
     NODES ||--o{ EDGES : "from_node (CASCADE)"
     NODES ||--o{ EDGES : "to_node (CASCADE)"
     EDGES ||--o{ PREDICTIONS : "edge_id (CASCADE)"
+    USERS ||--o{ CHAT_SESSIONS : "user_id (CASCADE)"
+    CHAT_SESSIONS ||--o{ CHAT_MESSAGES : "session_id (CASCADE)"
 
     USERS {
         uuid user_id PK "UUIDv4 khóa chính"
@@ -100,6 +118,7 @@ erDiagram
         string full_name "Họ và tên người dùng"
         string role "Vai trò: user / admin"
         int token_version "Phiên bản token kiểm soát thu hồi"
+        string encryption_salt "Muối dẫn xuất User Master Key (Base64)"
         datetime created_at "Thời điểm tạo tài khoản (UTC)"
     }
 
@@ -161,20 +180,46 @@ erDiagram
         float risk_factor "Hệ số rủi ro (0.0 -> 1.0)"
         datetime updated_at "Thời điểm cập nhật dự báo (UTC)"
     }
+
+    CHAT_SESSIONS {
+        uuid id PK "UUIDv4 khóa chính"
+        uuid user_id FK "FK tham chiếu USERS.user_id (CASCADE)"
+        string title_encrypted "Ciphertext tiêu đề phiên chat (Base64)"
+        string title_nonce "Nonce 12-byte của tiêu đề (Base64)"
+        string session_key_enc_user "K_session mã hóa bằng User Master Key"
+        string session_key_nonce_user "Nonce giải mã K_session cho User"
+        string session_key_enc_server "K_session mã hóa bằng Server Secret"
+        string session_key_nonce_server "Nonce giải mã K_session cho Server"
+        datetime created_at "Thời điểm tạo phiên chat (UTC)"
+        datetime updated_at "Thời điểm hoạt động gần nhất (UTC)"
+    }
+
+    CHAT_MESSAGES {
+        uuid id PK "UUIDv4 khóa chính"
+        uuid session_id FK "FK tham chiếu CHAT_SESSIONS.id (CASCADE)"
+        string role "Vai trò: 'user' hoặc 'model'"
+        string ciphertext "Nội dung tin nhắn mã hóa AES-256-GCM (Base64)"
+        string nonce "12-byte Nonce độc nhất chống Replay (Base64)"
+        datetime created_at "Thời điểm gửi tin nhắn (UTC)"
+    }
 ```
 
 ### 2.2. Điểm kiến trúc cốt lõi của Database
 
-1. **Quản lý mô hình ML trong Database (`ml_models`)**: Thay vì phụ thuộc vào file tĩnh trên đĩa (`.joblib`), các mô hình sau khi huấn luyện được lưu dưới dạng nhị phân (`LargeBinary`). Hệ thống truy vấn phiên bản có `is_active=True` và `version` cao nhất để nạp vào bộ nhớ.
-2. **Loại bỏ phụ thuộc file CSV tĩnh (`traffic_data`)**: Mọi dữ liệu lịch sử giao thông phục vụ huấn luyện AI và tính toán trạng thái giao thông đều được quản lý tập trung trong bảng `traffic_data`.
-3. **Cơ chế thu hồi Token tức thời (`token_version` trong `users`)**: Cho phép thu hồi token ngay lập tức khi đổi mật khẩu mà không cần lưu blacklist Redis phức tạp.
+1. **Quản lý mô hình ML trong Database (`ml_models`)**: Thay vì phụ thuộc vào file tĩnh trên đĩa (`.joblib`), các mô hình sau khi huấn luyện được lưu dưới dạng nhị phân (`LargeBinary BLOB`). Hệ thống truy vấn phiên bản có `is_active=True` và `version` cao nhất để nạp trực tiếp vào RAM.
+2. **Loại bỏ phụ thuộc file CSV tĩnh (`traffic_data`)**: Mọi dữ liệu lịch sử giao thông phục vụ huấn luyện AI và tính toán trạng thái giao thông đều được quản lý tập trung và đánh chỉ mục trong bảng `traffic_data`.
+3. **Cơ chế thu hồi Token tức thời (`token_version` trong `users`)**: Cho phép thu hồi toàn bộ token của tài khoản ngay lập tức khi người dùng đổi mật khẩu mà không cần triển khai blacklist Redis phức tạp.
+4. **Mã hóa E2E & Lưu trữ Zero-Knowledge cho Chatbot (`chat_sessions`, `chat_messages`)**:
+   - Toàn bộ nội dung câu hỏi của người dùng, phản hồi của Gemini AI và tiêu đề phiên đều được lưu trữ dưới dạng **Ciphertext + Nonce** (AES-256-GCM). Cơ sở dữ liệu tuyệt đối không chứa văn bản thô (Plaintext).
+   - Cơ chế **Dual-Envelope Session Key**: Khóa phiên $K_{session}$ được bọc 2 lớp riêng biệt: một lớp mã hóa bằng `User Master Key` (giúp đồng bộ đa thiết bị khi người dùng đăng nhập từ máy mới) và một lớp mã hóa bằng `Server App Secret` (cho phép Server giải mã tạm thời trong RAM khi tương tác với Gemini).
+   - Ràng buộc độc nhất cấp cơ sở dữ liệu `UNIQUE(session_id, nonce)` ngăn chặn hoàn toàn tấn công phát lại (Replay Attack) và bảo vệ an toàn cho bộ sinh dòng khóa AES-GCM.
 
 ---
 
 ## 3. Hướng dẫn cài đặt & Khởi chạy
 
 ### 3.1. Yêu cầu hệ thống
-- **Python**: Phiên bản `>= 3.14`
+- **Python**: Phiên bản `>= 3.14` (hoặc Python 3.12+)
 - **Trình quản lý gói**: Khuyến nghị dùng [uv](https://docs.astral.sh/uv/) (hoặc `pip` / `venv` chuẩn)
 - **Hệ điều hành**: Linux, macOS hoặc Windows
 
@@ -183,7 +228,7 @@ erDiagram
 Sử dụng **uv** (nhanh và chuẩn xác nhất):
 ```bash
 # Clone repository
-git clone <repository_url>
+git clone https://github.com/HungNguyen254/TRAFFIC_SYSTEM_BE.git
 cd BE
 
 # Đồng bộ môi trường ảo và cài đặt toàn bộ dependencies
@@ -228,9 +273,16 @@ JWT_SECRET_KEY="dev-secret-key-change-in-production-must-be-long-enough"
 JWT_ALGORITHM="HS256"
 ACCESS_TOKEN_EXPIRE=1440
 
-# Giới hạn tần suất gọi API
+# Giới hạn tần suất gọi API (SlowAPI)
 RATE_LIMIT_ENABLED=True
 RATE_LIMIT_DEFAULT="60/minute"
+
+# Tích hợp Chatbot AI & Mật mã (Google Gemini & E2E Crypto)
+# Lấy khóa miễn phí tại: https://aistudio.google.com/
+GEMINI_API_KEY="your-google-gemini-api-key"
+GEMINI_MODEL="gemini-2.5-flash"
+# Khóa Server Master (Base64 chuỗi 32 byte). Để trống hệ thống sẽ tự sinh ngẫu nhiên khi khởi động
+CHAT_MASTER_KEY=""
 ```
 
 ### 3.4. Khởi tạo dữ liệu và nạp mô hình AI
@@ -258,7 +310,7 @@ uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 Truy cập kiểm tra:
 - **API Root**: [http://127.0.0.1:8000/api/data](http://127.0.0.1:8000/api/data)
 - **Health Check**: [http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health)
-- **Tài liệu Swagger UI**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **Tài liệu Swagger UI tương tác**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - **Tài liệu ReDoc**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
 
 ---
@@ -273,13 +325,15 @@ BE/
 │   │       ├── endpoints/
 │   │       │   ├── admin.py          # API quản trị (Huấn luyện lại mô hình ML ngầm)
 │   │       │   ├── auth.py           # API xác thực (Đăng ký, Đăng nhập, Profile, Đổi mật khẩu)
+│   │       │   ├── chat.py           # API Chatbot AI E2E (Handshake, Message, Sessions)
 │   │       │   ├── directions.py     # API tìm đường tối ưu (Dijkstra)
 │   │       │   ├── edges.py          # API trạng thái đường & CRUD Edges
 │   │       │   └── predictions.py    # API dự báo tình trạng giao thông tương lai
 │   │       └── router.py             # Tổng hợp các endpoint v1
 │   ├── core/
 │   │   ├── config.py                 # Cấu hình Pydantic BaseSettings & validate môi trường
-│   │   ├── database.py               # Kết nối cơ sở dữ liệu, SessionDep, health probe
+│   │   ├── crypto.py                 # Mật mã E2E (ECDH X25519, AES-256-GCM, PBKDF2, HKDF)
+│   │   ├── database.py               # Kết nối cơ sở dữ liệu, SessionDep, schema auto-patch
 │   │   ├── exceptions.py             # Định nghĩa mã lỗi tùy chỉnh (AppException)
 │   │   ├── handlers.py               # Xử lý ngoại lệ tập trung (Centralized Exception Handlers)
 │   │   ├── limiter.py                # Cấu hình Rate Limiter (SlowAPI)
@@ -288,33 +342,42 @@ BE/
 │   ├── middlewares/
 │   │   └── middleware.py             # Cấu hình CORS middleware
 │   ├── models/                       # Các thực thể dữ liệu SQLModel (Database Tables)
+│   │   ├── chat.py                   # Bảng ChatSession & ChatMessage
 │   │   ├── edge.py                   # Cung đường nối 2 nút giao
 │   │   ├── ml_model.py               # Bản ghi nhị phân mô hình ML
 │   │   ├── node.py                   # Nút giao thông
 │   │   ├── prediction.py             # Dữ liệu dự báo theo giờ
 │   │   ├── traffic_data.py           # Bản ghi dữ liệu giao thông lịch sử
-│   │   └── user.py                   # Tài khoản người dùng & phân quyền
+│   │   └── user.py                   # Tài khoản người dùng, RBAC & encryption_salt
 │   ├── schemas/                      # Pydantic Schemas (Request Payload & Response DTO)
 │   │   ├── auth.py
+│   │   ├── chat.py
 │   │   ├── edge_status.py
 │   │   ├── prediction.py
 │   │   ├── routing.py
 │   │   └── traffic.py
 │   ├── services/                     # Lớp xử lý nghiệp vụ chính (Business Logic Layer)
 │   │   ├── auth_service.py           # Nghiệp vụ đăng ký, xác thực, đổi mật khẩu
+│   │   ├── gemini_service.py         # Gọi Google Gemini REST API đa lượt hội thoại
 │   │   ├── prediction_service.py     # Nạp mô hình ML từ DB, dự báo timeline, fallback
 │   │   ├── routing_service.py        # Dựng đồ thị NetworkX, chạy thuật toán Dijkstra
 │   │   └── traffic_service.py        # Tính toán snapshot tốc độ, lọc BBox / District
 │   └── main.py                       # Điểm khởi chạy FastAPI, Lifespan kết nối DB & nạp model
 ├── data/
 │   └── synthetic_traffic_dataset.csv # File dữ liệu giao thông mẫu dự phòng
-├── scripts/
+├── docs/                             # Tài liệu kiến trúc và kế hoạch thực thi (Superpowers)
+│   ├── README.md                     # Mục lục tài liệu thiết kế và kế hoạch
+│   └── superpowers/                  # Specs và Plans chi tiết
+├── scripts/                          # Bộ công cụ dòng lệnh (CLI Utilities)
+│   ├── README.md                     # Hướng dẫn chi tiết sử dụng các scripts
+│   ├── chat_e2e_client_demo.py       # Demo Client E2E mã hóa + đa thiết bị
 │   ├── generate_synthetic_traffic.py # Sinh dữ liệu giao thông giả lập
 │   ├── import_traffic_csv_to_db.py   # Nhập dữ liệu CSV vào bảng traffic_data
 │   ├── seed_hanoi_network.py         # Nạp các nút giao và cung đường mẫu Hà Nội
 │   └── train_prediction_model.py     # Huấn luyện Random Forest & lưu vào bảng ml_models
-├── tests/                            # Bộ kiểm thử tự động toàn diện (30 unit & integration tests)
-├── .env.example                      # File mẫu biến môi trường
+├── tests/                            # Bộ kiểm thử tự động toàn diện (48 tests, 100% PASS)
+│   └── README.md                     # Hướng dẫn kiểm thử và mô tả từng module test
+├── .env.example                      # File mẫu biến môi trường chuẩn
 ├── pyproject.toml                    # Quản lý cấu hình dự án và dependencies
 └── requirements.txt                  # Danh sách dependencies đã ghim phiên bản
 ```
@@ -332,8 +395,8 @@ Toàn bộ các phản hồi từ API (cả thành công lẫn thất bại) đ�
   "message": "Thông điệp mô tả kết quả xử lý thành công",
   "data": { ... },
   "error": null,
-  "path": "/api/v1/auth/me",
-  "timestamp": "2026-11-14T10:30:00.000000Z"
+  "path": "/api/v1/chat/sessions",
+  "timestamp": "2026-11-15T15:30:00.000000Z"
 }
 ```
 
@@ -345,7 +408,7 @@ Toàn bộ các phản hồi từ API (cả thành công lẫn thất bại) đ�
   "data": null,
   "error": "UNAUTHORIZED",
   "path": "/api/v1/auth/me",
-  "timestamp": "2026-11-14T10:30:00.000000Z"
+  "timestamp": "2026-11-15T15:30:00.000000Z"
 }
 ```
 
@@ -358,11 +421,11 @@ Toàn bộ các phản hồi từ API (cả thành công lẫn thất bại) đ�
 | Nhóm | Phương thức | Đường dẫn | Quyền hạn | Giới hạn (Rate Limit) | Mục đích chính |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **System** | `GET` | `/api/data` | Public | - | Lời chào mừng và xác nhận API hoạt động |
-| | `GET` | `/api/health` | Public | - | Kiểm tra sức khỏe máy chủ & trạng thái DB |
-| **Auth** | `POST` | `/api/v1/auth/register` | Public | 5 req/phút | Đăng ký tài khoản người dùng mới |
+| | `GET` | `/api/health` | Public | - | Kiểm tra sức khỏe máy chủ & trạng thái kết nối DB |
+| **Auth** | `POST` | `/api/v1/auth/register` | Public | 5 req/phút | Đăng ký tài khoản người dùng mới (Argon2) |
 | | `POST` | `/api/v1/auth/login` | Public | 5 req/phút | Đăng nhập nhận Access Token (JWT) |
 | | `GET` | `/api/v1/auth/me` | Bearer Token | - | Lấy thông tin tài khoản hiện tại |
-| | `POST` | `/api/v1/auth/change-password` | Bearer Token | 5 req/phút | Đổi mật khẩu & vô hiệu hóa token cũ |
+| | `POST` | `/api/v1/auth/change-password` | Bearer Token | 5 req/phút | Đổi mật khẩu & vô hiệu hóa ngay token cũ |
 | **Edges** | `GET` | `/api/v1/edges/status` | Public | 60 req/phút | Lấy tình trạng tắc đường theo BBox / Quận |
 | | `GET` | `/api/v1/edges` | Public | 30 req/phút | Lấy danh sách nodes & edges kèm mức tắc |
 | | `GET` | `/api/v1/edges/{edge_id}` | Public | - | Lấy chi tiết thông tin một đoạn đường |
@@ -371,6 +434,13 @@ Toàn bộ các phản hồi từ API (cả thành công lẫn thất bại) đ�
 | | `DELETE`| `/api/v1/edges/{edge_id}` | **Admin** | - | Xóa đoạn đường khỏi hệ thống |
 | **Routing**| `GET` | `/api/v1/directions` | Public | 20 req/phút | Tìm đường tối ưu (`distance` hoặc `duration`) |
 | **Predict**| `POST` | `/api/v1/predictions/forecast`| Public | 10 req/phút | Dự báo dòng thời gian tắc đường tương lai |
+| **Chat AI**| `GET` | `/api/v1/chat/user-salt` | Bearer Token | 60 req/phút | Lấy User Salt & Public Key Server phục vụ E2E |
+| | `POST` | `/api/v1/chat/handshake` | Bearer Token | 20 req/phút | Bắt tay ECDH X25519 & tạo phiên trò chuyện |
+| | `POST` | `/api/v1/chat/message` | Bearer Token | 30 req/phút | Gửi tin nhắn mã hóa E2E & nhận trả lời Gemini AI |
+| | `GET` | `/api/v1/chat/sessions` | Bearer Token | 60 req/phút | Lấy danh sách phiên chat (kèm User Session Key) |
+| | `PATCH` | `/api/v1/chat/sessions/{session_id}` | Bearer Token | 30 req/phút | Cập nhật tiêu đề mã hóa cho phiên chat |
+| | `GET` | `/api/v1/chat/sessions/{session_id}/messages`| Bearer Token | 60 req/phút | Lấy toàn bộ lịch sử tin nhắn mã hóa của phiên |
+| | `DELETE`| `/api/v1/chat/sessions/{session_id}` | Bearer Token | 20 req/phút | Xóa phiên chat và các tin nhắn liên quan |
 | **Admin** | `POST` | `/api/v1/admin/retrain-model` | **Admin** | 2 req/phút | Kích hoạt huấn luyện lại mô hình AI ngầm |
 
 ---
@@ -380,11 +450,7 @@ Toàn bộ các phản hồi từ API (cả thành công lẫn thất bại) đ�
 #### Hệ thống & Health Check
 
 ##### 1. `GET /api/health`
-- **Mục đích**: Kiểm tra tình trạng hoạt động của máy chủ và kết nối đến cơ sở dữ liệu (PostgreSQL/SQLite).
-- **Ví dụ gọi cURL**:
-```bash
-curl -X GET "http://127.0.0.1:8000/api/health"
-```
+- **Mục đích**: Kiểm tra tình trạng máy chủ và kết nối cơ sở dữ liệu an toàn.
 - **Dữ liệu trả về**:
 ```json
 {
@@ -396,7 +462,7 @@ curl -X GET "http://127.0.0.1:8000/api/health"
   },
   "error": null,
   "path": "/api/health",
-  "timestamp": "2026-11-14T10:30:00Z"
+  "timestamp": "2026-11-15T15:30:00Z"
 }
 ```
 
@@ -405,7 +471,7 @@ curl -X GET "http://127.0.0.1:8000/api/health"
 #### Xác thực & Phân quyền (Auth & RBAC)
 
 ##### 1. `POST /api/v1/auth/register`
-- **Mục đích**: Đăng ký người dùng mới. Mật khẩu được mã hóa an toàn bằng thuật toán **Argon2**.
+- **Mục đích**: Đăng ký người dùng mới. Mật khẩu được băm bằng **Argon2**, tự động sinh `encryption_salt` cho E2E Cryptography.
 - **Request Body**:
 ```json
 {
@@ -416,7 +482,7 @@ curl -X GET "http://127.0.0.1:8000/api/health"
 ```
 
 ##### 2. `POST /api/v1/auth/login`
-- **Mục đích**: Xác thực người dùng và cấp JWT Access Token.
+- **Mục đích**: Xác thực người dùng và cấp JWT Access Token (chứa `sub`, `role`, `token_version`).
 - **Request Body**:
 ```json
 {
@@ -443,79 +509,29 @@ curl -X GET "http://127.0.0.1:8000/api/health"
 - **Header bắt buộc**: `Authorization: Bearer <access_token>`
 
 ##### 4. `POST /api/v1/auth/change-password`
-- **Mục đích**: Đổi mật khẩu người dùng. Hệ thống sẽ tăng `token_version` trong database, giúp **lập tức vô hiệu hóa mọi access token cũ**.
-- **Request Body**:
-```json
-{
-  "current_password": "SecurePassword123!",
-  "new_password": "NewUltraSecurePass456!"
-}
-```
+- **Mục đích**: Đổi mật khẩu. Tăng `token_version` trong database để **lập tức vô hiệu hóa mọi access token cũ**.
 
 ---
 
 #### Giám sát & Quản lý cung đường (Edges & Traffic Status)
 
 ##### 1. `GET /api/v1/edges/status`
-- **Mục đích**: Trả về tình trạng giao thông mới nhất của các đoạn đường.
-- **Các tham số lọc (Query Params)**:
-  - `bbox`: Chuỗi khung nhìn bản đồ, định dạng `"min_lng,min_lat,max_lng,max_lat"` (chuẩn GeoJSON/Mapbox) hoặc `"min_lat,min_lng,max_lat,max_lng"`.
-  - Hoặc 4 tham số tọa độ độc lập: `min_lat`, `min_lng`, `max_lat`, `max_lng`.
-  - `district` / `area`: Lọc theo Quận/Huyện (vd: `Đống Đa`, `Cau Giay` — **hỗ trợ tìm kiếm tiếng Việt không dấu, không phân biệt hoa thường**).
-  - `hour`: Khung giờ (0-23, mặc định là giờ hiện tại theo múi giờ Hà Nội `Asia/Ho_Chi_Minh`).
-  - `day_of_week`: Thứ trong tuần (0: Thứ 2 ... 6: Chủ Nhật, mặc định là ngày hiện tại).
-- **Ví dụ gọi cURL**:
+- **Mục đích**: Trả về tình trạng giao thông thời gian thực của các đoạn đường.
+- **Query Params**:
+  - `bbox`: Chuỗi khung nhìn `"min_lng,min_lat,max_lng,max_lat"` hoặc `"min_lat,min_lng,max_lat,max_lng"`.
+  - Hoặc 4 tham số: `min_lat`, `min_lng`, `max_lat`, `max_lng`.
+  - `district`: Lọc theo Quận/Huyện (vd: `Đống Đa`, `Cau Giay` — **hỗ trợ tìm kiếm tiếng Việt không dấu, không phân biệt hoa thường**).
+  - `hour`: Khung giờ (0-23, mặc định giờ hiện tại theo múi giờ `Asia/Ho_Chi_Minh`).
+  - `day_of_week`: Thứ (0: Thứ 2 ... 6: Chủ Nhật).
+- **Ví dụ gọi**:
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/edges/status?district=Dong%20Da&hour=18"
 ```
-- **Cấu trúc dữ liệu trả về**:
-```json
-{
-  "status_code": 200,
-  "message": "Lấy tình trạng của 24 đoạn đường thành công",
-  "data": {
-    "total": 24,
-    "updated_at": "2026-11-14T10:30:00Z",
-    "filters": {
-      "district": "Dong Da",
-      "hour": 18,
-      "day_of_week": 5
-    },
-    "edges": [
-      {
-        "edge_id": "7ac18c89-c439-4d64-8898-75b8e97f0eb9",
-        "edge_code": "EDGE_LANG_01",
-        "street_name": "Đường Láng",
-        "length_km": 1.2,
-        "max_speed_limit": 50,
-        "from_node": {
-          "node_code": "NODE_NTS",
-          "node_name": "Ngã tư Sở",
-          "district": "Đống Đa",
-          "lat": 21.0025,
-          "lng": 105.8198
-        },
-        "to_node": {
-          "node_code": "NODE_CG",
-          "node_name": "Nút giao Cầu Giấy",
-          "district": "Cầu Giấy",
-          "lat": 21.0332,
-          "lng": 105.7985
-        },
-        "speed": 16.5,
-        "congestion_level": 3,
-        "congestion_text": "Ùn tắc nghiêm trọng",
-        "updated_at": "2026-11-14T10:30:00Z"
-      }
-    ]
-  }
-}
-```
 
 ##### 2. `GET /api/v1/edges`
-- **Mục đích**: Trả về dữ liệu kết hợp cả danh sách `nodes` và `edges` kèm thông số giao thông phục vụ hiển thị lớp phủ bản đồ (Map overlay).
+- **Mục đích**: Trả về dữ liệu kết hợp cả danh sách `nodes` và `edges` kèm thông số giao thông phục vụ hiển thị lớp phủ bản đồ (Map Overlay).
 
-##### 3. Quản lý Cung đường (CRUD Edges - Yêu cầu quyền Admin)
+##### 3. Quản lý Cung đường (CRUD Edges - Quyền Admin)
 - `POST /api/v1/edges`: Tạo đoạn đường mới.
 - `GET /api/v1/edges/{edge_id}`: Xem chi tiết đoạn đường.
 - `PUT /api/v1/edges/{edge_id}`: Cập nhật thông tin đoạn đường.
@@ -526,46 +542,16 @@ curl -X GET "http://127.0.0.1:8000/api/v1/edges/status?district=Dong%20Da&hour=1
 #### Tìm đường thông minh (Directions & Routing)
 
 ##### `GET /api/v1/directions`
-- **Mục đích**: Tìm lộ trình tối ưu giữa hai nút giao bằng thuật toán Dijkstra trên đồ thị đa hướng có hướng (`nx.MultiDiGraph`).
+- **Mục đích**: Tìm lộ trình tối ưu bằng thuật toán Dijkstra trên đồ thị đa hướng có hướng (`nx.MultiDiGraph`) kết hợp In-Memory Cache (TTL 300s).
 - **Query Params**:
   - `origin_node_id` (UUID): ID của nút giao xuất phát.
   - `destination_node_id` (UUID): ID của nút giao đích.
-  - `weight_mode`: Chế độ tối ưu hóa:
-    - `"distance"`: Ưu tiên **quãng đường ngắn nhất** (tổng km nhỏ nhất).
-    - `"duration"`: Ưu tiên **thời gian di chuyển nhanh nhất** (tổng phút nhỏ nhất, tính theo vận tốc cho phép và tình trạng giao thông).
-- **Ví dụ gọi cURL**:
+  - `weight_mode`: Chế độ tối ưu:
+    - `"distance"`: Ưu tiên quãng đường ngắn nhất (tổng km nhỏ nhất).
+    - `"duration"`: Ưu tiên thời gian di chuyển nhanh nhất (phút).
+- **Ví dụ gọi**:
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/directions?origin_node_id=11111111-1111-1111-1111-111111111111&destination_node_id=22222222-2222-2222-2222-222222222222&weight_mode=duration"
-```
-- **Dữ liệu trả về**:
-```json
-{
-  "status_code": 200,
-  "message": "Tìm tuyến thành công",
-  "data": {
-    "origin_node_id": "11111111-1111-1111-1111-111111111111",
-    "destination_node_id": "22222222-2222-2222-2222-222222222222",
-    "node_ids": ["11111111-...", "22222222-..."],
-    "node_names": ["Ngã tư Sở", "Nút giao Cầu Giấy"],
-    "edge_ids": ["7ac18c89-..."],
-    "steps": [
-      {
-        "edge_id": "7ac18c89-...",
-        "edge_code": "EDGE_LANG_01",
-        "street_name": "Đường Láng",
-        "length_km": 1.2,
-        "travel_min": 2.4,
-        "speed_kmh": 30.0
-      }
-    ],
-    "polyline": [
-      [105.8198, 21.0025],
-      [105.7985, 21.0332]
-    ],
-    "total_distance_km": 1.2,
-    "total_duration_min": 2.4
-  }
-}
 ```
 
 ---
@@ -573,79 +559,159 @@ curl -X GET "http://127.0.0.1:8000/api/v1/directions?origin_node_id=11111111-111
 #### Dự báo giao thông AI (Predictions & Forecast)
 
 ##### `POST /api/v1/predictions/forecast`
-- **Mục đích**: Dự đoán tốc độ di chuyển, chỉ số rủi ro và mức độ tắc nghẽn theo dòng thời gian tương lai (ví dụ sau 30 phút, 60 phút, 120 phút...) bằng mô hình **Random Forest Regressor**.
+- **Mục đích**: Dự đoán tốc độ di chuyển, chỉ số rủi ro và mức độ tắc nghẽn theo dòng thời gian tương lai (sau 30p, 60p, 120p...) qua mô hình **Random Forest Regressor** (hoặc Heuristic Fallback).
 - **Request Body**:
 ```json
 {
   "edge_id": "7ac18c89-c439-4d64-8898-75b8e97f0eb9",
-  "base_time": "2026-11-14T17:00:00Z",
+  "base_time": "2026-11-15T17:00:00Z",
   "minutes_ahead": [30, 60, 120],
   "weather": "rain"
 }
 ```
-*(Ghi chú: Có thể truyền `street_name` thay vì `edge_id` nếu người dùng tìm kiếm theo tên đường).*
 
+---
+
+#### Trợ lý Chatbot AI Mã hóa E2E (Chatbot AI & Gemini)
+
+Toàn bộ các endpoint dưới đây đều yêu cầu xác thực JWT (`Authorization: Bearer <token>`).
+
+##### 1. `GET /api/v1/chat/user-salt`
+- **Mục đích**: Lấy `encryption_salt` của người dùng để client dẫn xuất `User Master Key` (UMK) qua PBKDF2, đồng thời nhận `server_public_key` (X25519) phục vụ handshake.
 - **Dữ liệu trả về**:
 ```json
 {
   "status_code": 200,
-  "message": "Dự báo tình trạng giao thông thành công",
+  "message": "Lấy salt và server public key thành công",
   "data": {
-    "edge_id": "7ac18c89-c439-4d64-8898-75b8e97f0eb9",
-    "street_name": "Đường Láng",
-    "max_speed_limit": 50,
-    "base_time": "2026-11-14T17:00:00Z",
-    "weather": "rain",
-    "timeline": [
-      {
-        "minutes_ahead": 30,
-        "target_time": "2026-11-14T17:30:00Z",
-        "hour_of_day": 17,
-        "day_of_week": 5,
-        "predicted_speed": 16.8,
-        "max_speed_limit": 50,
-        "risk_factor": 0.66,
-        "congestion_level": 3,
-        "description": "Đông đúc, nguy cơ ùn ứ vào khung giờ này"
-      },
-      {
-        "minutes_ahead": 60,
-        "target_time": "2026-11-14T18:00:00Z",
-        "hour_of_day": 18,
-        "day_of_week": 5,
-        "predicted_speed": 13.2,
-        "max_speed_limit": 50,
-        "risk_factor": 0.74,
-        "congestion_level": 4,
-        "description": "Tắc nghẽn nghiêm trọng, nên chọn lộ trình tránh"
-      }
-    ],
-    "updated_at": "2026-11-14T17:05:00Z"
+    "encryption_salt": "k76Jk+32rgUaLXlso+kq7w==",
+    "server_public_key": "h60b5zgCebQiJUnuSdgR89+MOEa84xYoc9e2lN+gzCM="
   }
 }
 ```
+
+##### 2. `POST /api/v1/chat/handshake`
+- **Mục đích**: Khởi tạo phiên trò chuyện mới. Client gửi `client_public_key` (X25519) và khóa đối xứng phiên đã bọc bằng UMK (`session_key_enc_user`). Hai bên độc lập tính toán khóa đối xứng phiên $K_{session}$ qua ECDH X25519 và HKDF-SHA256.
+- **Request Body**:
+```json
+{
+  "client_public_key": "Base64(32-byte-X25519-public-key)",
+  "title_encrypted": "Base64(Ciphertext tiêu đề)",
+  "title_nonce": "Base64(12-byte nonce tiêu đề)",
+  "session_key_enc_user": "Base64(K_session được mã hóa bằng UMK)",
+  "session_key_nonce_user": "Base64(12-byte nonce UMK)"
+}
+```
+- **Dữ liệu trả về**:
+```json
+{
+  "status_code": 200,
+  "message": "Khởi tạo phiên chat thành công",
+  "data": {
+    "session_id": "71f61c99-743c-4490-b694-f18a51acecd0",
+    "server_public_key": "h60b5zgCebQiJUnuSdgR89+MOEa84xYoc9e2lN+gzCM="
+  }
+}
+```
+
+##### 3. `POST /api/v1/chat/message`
+- **Mục đích**: Gửi tin nhắn mã hóa đầu cuối. Server kiểm tra chống nonce reuse, giải mã tạm thời trong RAM, nạp lịch sử hội thoại gần nhất, gọi Google Gemini API, mã hóa câu trả lời bằng $K_{session}$ và lưu trữ ciphertext vào cơ sở dữ liệu.
+- **Request Body**:
+```json
+{
+  "session_id": "71f61c99-743c-4490-b694-f18a51acecd0",
+  "ciphertext": "Base64(AES-256-GCM encrypted JSON payload)",
+  "nonce": "Base64(12-byte random unique nonce)"
+}
+```
+*(Trong đó JSON payload được mã hóa có dạng `{"content": "Tình hình giao thông hiện tại ra sao?", "timestamp": "..."}`)*.
+- **Dữ liệu trả về**:
+```json
+{
+  "status_code": 200,
+  "message": "Nhận phản hồi từ AI thành công",
+  "data": {
+    "session_id": "71f61c99-743c-4490-b694-f18a51acecd0",
+    "ciphertext": "Base64(Phản hồi mã hóa từ Gemini AI)",
+    "nonce": "Base64(12-byte nonce phản hồi)"
+  }
+}
+```
+
+##### 4. `GET /api/v1/chat/sessions`
+- **Mục đích**: Lấy danh sách các phiên chat của người dùng. Trả kèm `session_key_enc_user` và `session_key_nonce_user` để bất kỳ thiết bị mới nào của người dùng cũng có thể giải mã và khôi phục khóa phiên $K_{session}$.
+- **Dữ liệu trả về**:
+```json
+{
+  "status_code": 200,
+  "message": "Lấy danh sách phiên chat thành công",
+  "data": [
+    {
+      "id": "71f61c99-743c-4490-b694-f18a51acecd0",
+      "title_encrypted": "Z3NkZmc...",
+      "title_nonce": "MTIzNDU2...",
+      "session_key_enc_user": "a2V5X3VzZXI...",
+      "session_key_nonce_user": "bm9uY2VfdXNlcg...",
+      "created_at": "2026-11-15T15:20:00Z",
+      "updated_at": "2026-11-15T15:25:00Z"
+    }
+  ]
+}
+```
+
+##### 5. `PATCH /api/v1/chat/sessions/{session_id}`
+- **Mục đích**: Cập nhật tiêu đề mã hóa của phiên trò chuyện.
+- **Request Body**:
+```json
+{
+  "title_encrypted": "Base64(Ciphertext tiêu đề mới)",
+  "title_nonce": "Base64(12-byte nonce tiêu đề mới)"
+}
+```
+
+##### 6. `GET /api/v1/chat/sessions/{session_id}/messages`
+- **Mục đích**: Tải toàn bộ lịch sử tin nhắn mã hóa trong phiên. Client sử dụng $K_{session}$ để giải mã trực tiếp trên trình duyệt hoặc ứng dụng thiết bị đầu cuối.
+- **Dữ liệu trả về**:
+```json
+{
+  "status_code": 200,
+  "message": "Lấy lịch sử tin nhắn thành công",
+  "data": [
+    {
+      "id": "4b6c3384-...",
+      "session_id": "71f61c99-...",
+      "role": "user",
+      "ciphertext": "...",
+      "nonce": "...",
+      "created_at": "2026-11-15T15:21:00Z"
+    },
+    {
+      "id": "8a7d2291-...",
+      "session_id": "71f61c99-...",
+      "role": "model",
+      "ciphertext": "...",
+      "nonce": "...",
+      "created_at": "2026-11-15T15:21:05Z"
+    }
+  ]
+}
+```
+
+##### 7. `DELETE /api/v1/chat/sessions/{session_id}`
+- **Mục đích**: Xóa vĩnh viễn một phiên trò chuyện cùng toàn bộ tin nhắn liên quan (xóa tầng CASCADE).
 
 ---
 
 #### Quản trị viên (Admin Tasks)
 
 ##### `POST /api/v1/admin/retrain-model`
-- **Mục đích**: Kích hoạt quy trình huấn luyện lại mô hình ML dự báo giao thông trong nền (**BackgroundTasks**).
-- **Quyền hạn**: Bắt buộc tài khoản có quyền `role: "admin"`.
-- **Giới hạn gọi**: Tối đa 2 lần / phút.
-- **Cơ chế hoạt động**:
-  1. API ngay lập tức phản hồi `200 OK` với trạng thái `processing`.
-  2. Tiến trình nền chạy hàm `train_model()`: nạp dữ liệu từ `traffic_data`, huấn luyện mô hình mới, lưu phiên bản mới vào `ml_models` với `is_active=True`.
-  3. Tự động gọi `PredictionService.reload_model()` để cập nhật mô hình mới vào RAM mà không cần restart máy chủ.
-  4. Xóa cache giao thông `clear_traffic_data_cache()` để đồng bộ trạng thái mới nhất.
+- **Mục đích**: Kích hoạt quy trình huấn luyện lại mô hình ML dự báo giao thông trong nền (**BackgroundTasks**). Yêu cầu quyền `role: "admin"`. Tối đa 2 lần/phút.
 
 ---
 
 ## 7. Luồng nghiệp vụ & Cơ chế xử lý chi tiết (Business Flows)
 
 ### Luồng 1: Xác thực JWT & Thu hồi Token tức thì (Token Revocation)
-
-Hệ thống kết hợp ưu điểm của **Stateless Token** (không cần truy vấn DB mỗi request) và tính năng **Thu hồi Token ngay lập tức** khi có thay đổi bảo mật (đổi mật khẩu):
 
 ```mermaid
 sequenceDiagram
@@ -726,12 +792,6 @@ sequenceDiagram
     Router-->>Client: 200 OK Envelope
 ```
 
-#### Quy tắc phân loại mức độ ùn tắc (`congestion_level`):
-- **Cấp 1 - Thông thoáng** (Xanh lá): Vận tốc $\ge 35\text{ km/h}$.
-- **Cấp 2 - Di chuyển chậm** (Vàng): $25\text{ km/h} \le$ Vận tốc $< 35\text{ km/h}$.
-- **Cấp 3 - Ùn tắc nghiêm trọng** (Cam): $15\text{ km/h} \le$ Vận tốc $< 25\text{ km/h}$.
-- **Cấp 4 - Kẹt xe hoàn toàn** (Đỏ): Vận tốc $< 15\text{ km/h}$.
-
 ---
 
 ### Luồng 3: Tìm đường tối ưu (Dijkstra trên NetworkX & Graph Cache)
@@ -774,8 +834,6 @@ sequenceDiagram
 ---
 
 ### Luồng 4: Dự báo giao thông AI & Heuristic Fallback
-
-Hệ thống đảm bảo tính sẵn sàng cao (**High Availability**): nếu chưa có mô hình AI hoặc mô hình gặp lỗi giải nén, dịch vụ tự động chuyển sang cơ chế suy nghiệm thông minh (**Heuristic Fallback**):
 
 ```mermaid
 flowchart TD
@@ -835,69 +893,140 @@ flowchart TD
 
 ---
 
-## 8. Bảo mật & Giới hạn tần suất (Rate Limiting)
+### Luồng 6: Trò chuyện AI với Mã hóa E2E & Đồng bộ Đa thiết bị (Dual-Envelope Key Agreement)
 
-Hệ thống áp dụng kiến trúc bảo vệ nhiều lớp nhằm chống tấn công DoS, Brute-force và rò rỉ thông tin nhạy cảm:
+```mermaid
+sequenceDiagram
+    autonumber
+    actor ClientA as Device A (User)
+    participant API as Chat Endpoint (/chat)
+    participant Crypto as Core Crypto Engine
+    participant Gemini as GeminiService
+    participant DB as Database
+    actor ClientB as Device B (User Thiết bị Mới)
 
-### 8.1. Ma trận giới hạn tần suất (Rate Limiting Matrix)
-Được cấu hình thông qua thư viện **SlowAPI**:
+    Note over ClientA,API: Bước 1: Khởi tạo khóa & Bắt tay ECDH X25519
+    ClientA->>API: GET /api/v1/chat/user-salt
+    API-->>ClientA: Trả về {encryption_salt, server_public_key}
+    ClientA->>ClientA: Dẫn xuất User Master Key (UMK) từ password + salt (PBKDF2)
+    ClientA->>ClientA: Sinh cặp khóa X25519 & tính K_session qua ECDH + HKDF
+    ClientA->>ClientA: Mã hóa K_session bằng UMK -> session_key_enc_user
+    ClientA->>API: POST /api/v1/chat/handshake (client_pub, session_key_enc_user)
+    API->>Crypto: derive_shared_secret(server_priv, client_pub) -> tính K_session
+    API->>Crypto: encrypt_server_secret(K_session) -> session_key_enc_server
+    API->>DB: Lưu ChatSession (chứa cả 2 bản bọc khóa)
+    API-->>ClientA: Trả về {session_id, server_public_key}
+
+    Note over ClientA,Gemini: Bước 2: Gửi câu hỏi bảo mật E2E & Gọi AI
+    ClientA->>ClientA: Mã hóa prompt: AES-256-GCM(K_session, {"content": "Tắc đường không?"})
+    ClientA->>API: POST /api/v1/chat/message (session_id, ciphertext, nonce)
+    API->>DB: Kiểm tra nonce uniqueness (chống replay attack)
+    API->>Crypto: decrypt_server_secret() -> Khôi phục K_session trong RAM
+    API->>Crypto: decrypt_aes_gcm(K_session, ciphertext, nonce) -> Đọc prompt
+    API->>Gemini: generate_response(contents=[prompt + history])
+    Gemini-->>API: Trả về câu trả lời: "Đường Láng hiện đang thông thoáng..."
+    API->>Crypto: encrypt_aes_gcm(K_session, {"content": ai_reply}) -> (reply_ct, reply_nonce)
+    API->>DB: Commit nguyên tử: Lưu user_msg & ai_msg dạng Ciphertext
+    API-->>ClientA: Trả về MessageResponse {ciphertext: reply_ct, nonce: reply_nonce}
+    ClientA->>ClientA: decrypt_aes_gcm(K_session, reply_ct) -> Hiển thị tin nhắn AI
+
+    Note over ClientB,DB: Bước 3: Thiết bị B đăng nhập & Đồng bộ lịch sử
+    ClientB->>API: Đăng nhập -> Nhận JWT & User Salt
+    ClientB->>ClientB: Dẫn xuất UMK từ mật khẩu của mình
+    ClientB->>API: GET /api/v1/chat/sessions
+    API->>DB: Query sessions của user
+    API-->>ClientB: Trả về list sessions (kèm session_key_enc_user)
+    ClientB->>ClientB: decrypt_aes_gcm(UMK, session_key_enc_user) -> Khôi phục K_session!
+    ClientB->>API: GET /api/v1/chat/sessions/{id}/messages
+    API->>DB: Query messages (chỉ trả ciphertext + nonce)
+    API-->>ClientB: Trả về danh sách messages mã hóa
+    ClientB->>ClientB: Dùng K_session giải mã toàn bộ lịch sử trò chuyện cũ thành công!
+```
+
+---
+
+## 8. Bảo mật & Giới hạn tần suất (Rate Limiting & Cryptography)
+
+Hệ thống áp dụng kiến trúc phòng thủ chiều sâu (**Defense-in-Depth**), bảo vệ thông tin ở cả tầng truyền tải (In-Transit), tầng xử lý (In-Memory) và tầng lưu trữ (At-Rest):
+
+### 8.1. Ma trận giới hạn tần suất (SlowAPI)
 
 | Endpoint | Giới hạn gọi | Mục đích phòng thủ |
 | :--- | :--- | :--- |
-| `/api/v1/auth/register` | `5/minute` | Chống spam tạo tài khoản rác |
-| `/api/v1/auth/login` | `5/minute` | Chống tấn công dò mật khẩu (Brute-force) |
-| `/api/v1/auth/change-password` | `5/minute` | Bảo vệ tài khoản người dùng |
-| `/api/v1/admin/retrain-model` | `2/minute` | Chống quá tải CPU/RAM khi huấn luyện AI |
+| `/api/v1/auth/register` | `5/minute` | Chống spam đăng ký tài khoản tự động |
+| `/api/v1/auth/login` | `5/minute` | Chống dò quét mật khẩu (Brute-force) |
+| `/api/v1/auth/change-password` | `5/minute` | Bảo vệ tài khoản và chống tấn công đổi mật khẩu hàng loạt |
+| `/api/v1/chat/user-salt` | `60/minute` | Đảm bảo hiệu năng cấp salt cho thiết bị |
+| `/api/v1/chat/handshake` | `20/minute` | Chống spam bắt tay mã hóa tiêu tốn CPU (X25519) |
+| `/api/v1/chat/message` | `30/minute` | Quản lý hạn ngạch gọi Google Gemini API và giải mã AES |
+| `/api/v1/chat/sessions` | `60/minute` | Tải danh sách phiên an toàn |
+| `/api/v1/chat/sessions/{id}` | `30/minute` (PATCH) / `20/minute` (DELETE) | Cập nhật tiêu đề và xóa phiên |
+| `/api/v1/admin/retrain-model` | `2/minute` | Chống quá tải CPU/RAM khi huấn luyện lại mô hình AI |
 | `/api/v1/predictions/forecast` | `10/minute` | Tối ưu hóa tài nguyên tính toán inference |
 | `/api/v1/directions` | `20/minute` | Tránh nghẽn tính toán Dijkstra liên tục |
 | `/api/v1/edges/status` | `60/minute` | Hỗ trợ polling cập nhật bản đồ thời gian thực |
 
-### 8.2. Các cơ chế bảo mật bổ sung
-1. **Mã hóa mật khẩu bằng Argon2**: Sử dụng thuật toán đạt giải nhất cuộc thi Password Hashing Competition (PHC), chống tấn công bằng GPU/FPGA.
-2. **Kiểm tra độ an toàn cấu hình Production**: Khi khởi chạy ở môi trường ngoài `dev`, hệ thống tự động kiểm tra và chặn khởi động nếu `JWT_SECRET_KEY` còn mang giá trị mặc định hoặc độ dài dưới 32 ký tự.
-3. **Che giấu lỗi hệ thống (Safe Error Disclosure)**: API `/api/health` và các handler không làm lộ chuỗi kết nối cơ sở dữ liệu hay stack trace nội bộ ra ngoài Client.
+### 8.2. Kiến trúc Mật mã Đầu Cuối (E2E Cryptography) & Zero-Knowledge Storage
+
+1. **Trao đổi khóa ECDH X25519**: Sử dụng chuẩn đường cong Elliptic X25519 (RFC 7748) để thiết lập khóa bí mật chung (`shared_secret`) an toàn mà không cần truyền khóa trực tiếp qua mạng.
+2. **Dẫn xuất khóa HKDF & PBKDF2**:
+   - `PBKDF2HMAC(SHA256, 100,000 iterations)`: Dẫn xuất `User Master Key` 256-bit từ mật khẩu và `encryption_salt` của người dùng.
+   - `HKDF(SHA256)`: Mở rộng `shared_secret` thành khóa đối xứng phiên $K_{session}$ (32 bytes).
+3. **Mã hóa xác thực AES-256-GCM**: Toàn bộ payload tin nhắn, tiêu đề và khóa phiên đều được mã hóa bằng AES-256-GCM (Authenticated Encryption with Associated Data).
+4. **Chống Replay Attack bằng Nonce Độc Nhất**: Mỗi tin nhắn bắt buộc phải mang một 12-byte random nonce độc nhất. Ràng buộc `UNIQUE(session_id, nonce)` ở cấp database bảo đảm không bao giờ có sự lặp lại nonce trên cùng một khóa phiên.
+5. **Nguyên tắc Không Lưu Trữ Dữ Liệu Thô (Zero-Knowledge at Rest)**:
+   - Server và Database **hoàn toàn không lưu trữ plaintext** tin nhắn hay mật khẩu/khóa cá nhân của người dùng.
+   - Khi cần gọi Google Gemini, server chỉ giải mã prompt tạm thời trong RAM của request hiện tại, gửi đến Gemini qua kênh TLS mã hóa, mã hóa phản hồi ngay khi nhận được, rồi giải phóng plaintext khỏi bộ nhớ.
+
+### 8.3. Các cơ chế bảo mật bổ sung
+1. **Mã hóa mật khẩu bằng Argon2**: Sử dụng thuật toán băm mật khẩu tiêu chuẩn hàng đầu thế giới, chống tấn công bằng phần cứng chuyên dụng (GPU/ASIC).
+2. **Kiểm tra cấu hình Production bắt buộc**: Khi `ENVIRONMENT != 'dev'`, hệ thống tự động từ chối khởi động nếu `JWT_SECRET_KEY` mang giá trị mặc định hoặc độ dài dưới 32 ký tự.
+3. **Che giấu chi tiết lỗi hệ thống**: API `/api/health` và các exception handler không bao giờ để lộ database credentials, internal stack trace hay địa chỉ máy chủ ra ngoài client.
 
 ---
 
 ## 9. Các Scripts tiện ích (CLI Utilities)
 
-Trong thư mục `scripts/`, dự án cung cấp sẵn các công cụ dòng lệnh hỗ trợ thiết lập và vận hành:
+Trong thư mục `scripts/`, dự án cung cấp sẵn 5 công cụ dòng lệnh hoàn chỉnh:
 
-### 1. `scripts/seed_hanoi_network.py`
-Nạp danh sách các nút giao thông tiêu biểu tại Hà Nội (Ngã tư Sở, Cầu Giấy, Khuất Duy Tiến, Kim Mã, v.v.) và các cung đường kết nối giữa chúng vào cơ sở dữ liệu.
-```bash
-uv run python scripts/seed_hanoi_network.py
-```
+| Script | Mục đích | Hướng dẫn chạy |
+| :--- | :--- | :--- |
+| `seed_hanoi_network.py` | Nạp dữ liệu các nút giao thông và cung đường mẫu Hà Nội | `uv run python scripts/seed_hanoi_network.py` |
+| `generate_synthetic_traffic.py` | Sinh dữ liệu mô phỏng giao thông lớn | `uv run python scripts/generate_synthetic_traffic.py --rows 10000` |
+| `import_traffic_csv_to_db.py` | Nhập dữ liệu CSV vào database theo batch 1000 dòng | `uv run python scripts/import_traffic_csv_to_db.py --truncate` |
+| `train_prediction_model.py` | Huấn luyện mô hình Random Forest & lưu BLOB vào DB | `uv run python scripts/train_prediction_model.py` |
+| `chat_e2e_client_demo.py` | Chạy demo Client E2E: Bắt tay, mã hóa & đồng bộ 2 thiết bị | `uv run python scripts/chat_e2e_client_demo.py` |
 
-### 2. `scripts/import_traffic_csv_to_db.py`
-Chuyển đổi dữ liệu giao thông lịch sử từ file CSV vào bảng database `traffic_data` theo từng lô (batch insert 1000 bản ghi/lần).
-```bash
-# Xóa sạch dữ liệu cũ và nạp mới toàn bộ
-uv run python scripts/import_traffic_csv_to_db.py --csv-path data/synthetic_traffic_dataset.csv --truncate
-
-# Nạp thêm dữ liệu (append)
-uv run python scripts/import_traffic_csv_to_db.py --csv-path data/synthetic_traffic_dataset.csv
-```
-
-### 3. `scripts/train_prediction_model.py`
-Đọc trực tiếp dữ liệu huấn luyện từ bảng `traffic_data` trong database, huấn luyện `RandomForestRegressor`, đánh giá chỉ số và lưu trực tiếp nhị phân mô hình vào bảng `ml_models`.
-```bash
-uv run python scripts/train_prediction_model.py
-```
-
-### 4. `scripts/generate_synthetic_traffic.py`
-Sinh dữ liệu mô phỏng giao thông lớn dựa trên các phân phối thực tế (giờ cao điểm, ngày cuối tuần, điều kiện thời tiết).
-```bash
-uv run python scripts/generate_synthetic_traffic.py --rows 10000 --output data/synthetic_traffic_dataset.csv
-```
+> Chi tiết các tham số dòng lệnh và cờ nâng cao xem tại: [scripts/README.md](scripts/README.md).
 
 ---
 
 ## 10. Kiểm thử tự động (Testing)
 
-Dự án sở hữu bộ kiểm thử tự động toàn diện bao quát các module từ Core, Security, Database Models, Services cho đến Endpoints E2E:
+Dự án sở hữu bộ kiểm thử tự động toàn diện bao quát tất cả các tầng từ Core Cryptography, Database Models, Services cho đến API Endpoints E2E với **48 bài kiểm thử (100% PASS)**:
 
 ```bash
-# Chạy toàn bộ 30 bài kiểm thử với pytest qua uv
+# Chạy toàn bộ 48 bài kiểm thử với pytest qua uv
 uv run --with pytest python -m pytest -v
 ```
+
+### Danh mục các kịch bản kiểm thử:
+- `tests/test_admin_retrain_e2e.py`: Kiểm thử luồng E2E gọi API Admin retrain model chạy ngầm qua BackgroundTasks.
+- `tests/test_auth_token_revocation.py`: Kiểm thử cơ chế vô hiệu hóa Access Token tức thì khi đổi mật khẩu qua `token_version`.
+- `tests/test_chat_api.py`: Kiểm thử toàn bộ API Chatbot E2E (user-salt, handshake, message, sessions, title update, messages history, delete & chống nonce reuse).
+- `tests/test_chat_e2e_multidevice.py`: Kiểm thử tích hợp đa thiết bị: Device A tạo chat, Device B đăng nhập từ máy khác và dùng User Master Key khôi phục $K_{session}$ giải mã thành công lịch sử tin nhắn cũ.
+- `tests/test_chat_models.py`: Kiểm tra schema `ChatSession`, `ChatMessage`, ràng buộc khóa ngoại CASCADE và unique constraint nonce.
+- `tests/test_config_security.py`: Kiểm tra cơ chế tự động từ chối cấu hình insecure JWT secret trên production.
+- `tests/test_crypto.py`: Kiểm thử toàn diện thuật toán ECDH X25519, AES-256-GCM, HKDF, PBKDF2 và Server Secret encryption.
+- `tests/test_db_models.py`: Kiểm tra schema, ràng buộc khóa ngoại CASCADE và tính toàn vẹn của các thực thể SQLModel.
+- `tests/test_gemini_service.py`: Kiểm thử dịch vụ gọi Gemini API: multi-turn context payload, xử lý lỗi thiếu API key và giới hạn quota.
+- `tests/test_health_disclosure.py`: Đảm bảo health check không làm rò rỉ thông tin nhạy cảm của hệ thống.
+- `tests/test_import_csv.py`: Kiểm thử script import dữ liệu CSV theo batch và truncate table.
+- `tests/test_prediction_security.py`: Validate chặt chẽ dữ liệu đầu vào của API dự báo (giới hạn minutes_ahead).
+- `tests/test_prediction_service_db.py`: Kiểm thử nạp model từ database và cơ chế heuristic fallback khi DB chưa có model.
+- `tests/test_routing_cache.py`: Kiểm thử bộ nhớ đệm đồ thị NetworkX theo TTL.
+- `tests/test_security_jwt.py`: Kiểm thử mã hóa và giải mã JWT token roundtrip.
+- `tests/test_traffic_service_db.py`: Kiểm tra tính toán snapshot trạng thái giao thông trực tiếp từ bảng `traffic_data`.
+- `tests/test_train_prediction_model.py`: Kiểm thử huấn luyện mô hình và lưu BLOB vào `ml_models`.
+
+> Chi tiết về cách chạy từng nhóm kiểm thử xem tại: [tests/README.md](tests/README.md).
