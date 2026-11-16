@@ -13,6 +13,9 @@ from sqlmodel import Session, select
 from app.models.edge import Edge
 from app.models.prediction import Prediction
 from app.schemas.prediction import (
+    MapForecastEdge,
+    MapForecastRequest,
+    MapForecastResponse,
     PredictionRequest,
     PredictionResponse,
     PredictionTimelineItem,
@@ -263,4 +266,40 @@ class PredictionService:
             weather=payload.weather,
             timeline=timeline_items,
             updated_at=now,
+        )
+
+    @classmethod
+    def get_map_forecast(
+        cls, session: Session, payload: MapForecastRequest
+    ) -> MapForecastResponse:
+        base_time = datetime.now(UTC)
+        target_time = base_time + timedelta(minutes=payload.minutes_ahead)
+        local_target = target_time.astimezone(LOCAL_TZ)
+        edges = session.exec(select(Edge).order_by(Edge.street_name, Edge.edge_code)).all()
+
+        forecast_edges = []
+        for edge in edges:
+            speed, risk, level, description = cls._compute_prediction_values(
+                edge=edge,
+                hour_of_day=local_target.hour,
+                day_of_week=local_target.weekday(),
+                weather=payload.weather,
+            )
+            forecast_edges.append(
+                MapForecastEdge(
+                    edge_id=edge.edge_id,
+                    street_name=edge.street_name,
+                    max_speed_limit=edge.max_speed_limit,
+                    predicted_speed=speed,
+                    risk_factor=risk,
+                    congestion_level=level,
+                    description=description,
+                )
+            )
+
+        return MapForecastResponse(
+            minutes_ahead=payload.minutes_ahead,
+            base_time=base_time,
+            target_time=target_time,
+            edges=forecast_edges,
         )
