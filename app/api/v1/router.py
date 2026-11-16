@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     admin,
     auth,
     edges,
+    geocode,
     chat,
 )
 
@@ -15,4 +16,5 @@ api_v1_router.include_router(directions.router)
 api_v1_router.include_router(admin.router)
 api_v1_router.include_router(auth.router)
 api_v1_router.include_router(edges.router)
+api_v1_router.include_router(geocode.router)
 api_v1_router.include_router(chat.router)
