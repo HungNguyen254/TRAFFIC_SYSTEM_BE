@@ -10,6 +10,7 @@ from app.core.limiter import limiter
 from app.core.response import StandardResponse, success_response
 from app.core.security import get_current_admin
 from app.models.user import User
+from app.schemas.edge_history import EdgeHourlyHistoryResponse
 from app.schemas.edge_status import EdgeStatusResponse, parse_bbox_param
 from app.schemas.traffic import EdgeCreate, EdgeResponse, EdgeUpdate
 from app.services.traffic_service import TrafficService
@@ -136,6 +137,34 @@ def get_edges_with_traffic(
     return success_response(
         request=request,
         message=f"Lấy {len(data['edges'])} edges ({len(data['nodes'])} nodes) cho giờ {h}, thứ {d + 1}",
+        data=data,
+    )
+
+
+@router.get(
+    "/{edge_id}/history",
+    response_model=StandardResponse[EdgeHourlyHistoryResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Lịch sử tình trạng một đoạn đường trong khoảng thời gian, gộp theo giờ (biểu đồ + mô hình dự báo)",
+)
+@limiter.limit("30/minute")
+def get_edge_hourly_history(
+    request: Request,
+    session: SessionDep,
+    edge_id: uuid.UUID,
+    start: Annotated[
+        datetime, Query(description="Điểm bắt đầu ISO-8601; giờ lẻ được làm tròn xuống")
+    ],
+    end: Annotated[
+        datetime, Query(description="Điểm kết thúc ISO-8601; tối đa 7 ngày sau start")
+    ],
+):
+    data = TrafficService.get_edge_hourly_history(
+        session=session, edge_id=edge_id, start=start, end=end
+    )
+    return success_response(
+        request=request,
+        message=f"Lấy lịch sử {data.total_hours} giờ của đoạn {data.street_name} thành công",
         data=data,
     )
 

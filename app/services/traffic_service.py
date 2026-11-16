@@ -2,11 +2,12 @@ import logging
 import threading
 import unicodedata
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import Any
+from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.database import engine
@@ -14,11 +15,14 @@ from app.core.exceptions import BadRequestException, NotFoundException
 from app.models.edge import Edge
 from app.models.node import Node
 from app.models.traffic_data import TrafficData
+from app.schemas.edge_history import EdgeHourlyBucket, EdgeHourlyHistoryResponse
 from app.schemas.edge_status import EdgeStatusItem, EdgeStatusResponse, NodeBrief
 from app.schemas.traffic import EdgeCreate, EdgeUpdate
 
 logger = logging.getLogger(__name__)
 LOCAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+HISTORY_MAX_RANGE = timedelta(days=7)
 
 _TRAFFIC_DATA_CACHE: dict[str, list[tuple[int, int, float]]] | None = None
 _TRAFFIC_DATA_LOCK = threading.Lock()
@@ -88,6 +92,83 @@ def _speed_to_congestion_level(speed_kmh: float) -> int:
     if speed_kmh >= 15.0:
         return 3  # Ùn tắc nghiêm trọng
     return 4  # Kẹt xe hoàn toàn
+
+
+class _HourProfile(NamedTuple):
+    rush: int
+    avg_speed: float
+    min_speed: float
+    max_speed: float
+    avg_risk: float
+    samples: int
+
+
+def _as_local(moment: datetime) -> datetime:
+    """Datetime naive được hiểu là giờ địa phương, datetime aware chuyển về múi giờ dự án."""
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=LOCAL_TZ)
+    return moment.astimezone(LOCAL_TZ)
+
+
+def _hour_is_rush_hour(hour: int) -> int:
+    """Giờ cao điểm theo cùng quy tắc với scripts/generate_synthetic_traffic.py."""
+    return 1 if (7 <= hour <= 9 or 17 <= hour <= 19) else 0
+
+
+def _load_hour_profiles(session: Session, edge_code: str) -> dict[tuple[int, int], _HourProfile]:
+    """Trung bình hoá traffic_data theo (hour_of_day, day_of_week) của một đoạn đường."""
+    rows = session.exec(
+        select(
+            TrafficData.hour_of_day,
+            TrafficData.day_of_week,
+            func.max(TrafficData.is_rush_hour),
+            func.avg(TrafficData.average_speed),
+            func.min(TrafficData.average_speed),
+            func.max(TrafficData.average_speed),
+            func.avg(TrafficData.risk_factor),
+            func.count(TrafficData.id),
+        )
+        .where(TrafficData.edge_code == edge_code)
+        .group_by(TrafficData.hour_of_day, TrafficData.day_of_week)
+    ).all()
+    return {
+        (int(hour), int(dow)): _HourProfile(
+            rush=int(rush or 0),
+            avg_speed=float(avg_speed),
+            min_speed=float(min_speed),
+            max_speed=float(max_speed),
+            avg_risk=float(avg_risk),
+            samples=int(samples),
+        )
+        for hour, dow, rush, avg_speed, min_speed, max_speed, avg_risk, samples in rows
+    }
+
+
+def _hour_bucket(moment: datetime, profile: _HourProfile | None) -> EdgeHourlyBucket:
+    """Một thùng giờ cho biểu đồ; giờ chưa có dữ liệu vẫn được trả về với sample_count = 0."""
+    if profile is None:
+        return EdgeHourlyBucket(
+            time=moment,
+            hour_of_day=moment.hour,
+            day_of_week=moment.weekday(),
+            is_rush_hour=_hour_is_rush_hour(moment.hour),
+            sample_count=0,
+        )
+
+    level = _speed_to_congestion_level(profile.avg_speed)
+    return EdgeHourlyBucket(
+        time=moment,
+        hour_of_day=moment.hour,
+        day_of_week=moment.weekday(),
+        is_rush_hour=profile.rush,
+        average_speed=round(profile.avg_speed, 1),
+        min_speed=round(profile.min_speed, 1),
+        max_speed=round(profile.max_speed, 1),
+        congestion_level=level,
+        congestion_text=_congestion_level_to_text(level),
+        risk_factor=round(profile.avg_risk, 2),
+        sample_count=profile.samples,
+    )
 
 
 def _congestion_level_to_text(level: int) -> str:
@@ -196,6 +277,76 @@ class TrafficService:
     @staticmethod
     def get_edge_by_id(session: Session, edge_id: uuid.UUID) -> Edge | None:
         return session.get(Edge, edge_id)
+
+    @classmethod
+    def get_edge_hourly_history(
+        cls,
+        session: Session,
+        edge_id: uuid.UUID,
+        start: datetime,
+        end: datetime,
+    ) -> EdgeHourlyHistoryResponse:
+        """Lịch sử tình trạng một đoạn đường trong một khoảng thời gian, gộp theo giờ.
+
+        traffic_data chỉ lưu hồ sơ tuần điển hình (hour_of_day + day_of_week) chứ không có
+        thời điểm tuyệt đối, nên từng giờ trong khoảng được tra theo (day_of_week, hour_of_day)
+        của chính nó.
+        """
+        edge = session.get(Edge, edge_id)
+        if edge is None:
+            raise NotFoundException(
+                message=f"Không tìm thấy đoạn đường có id {edge_id}.",
+                error_code="EDGE_NOT_FOUND",
+                details={"edge_id": str(edge_id)},
+            )
+
+        start_local = _as_local(start)
+        end_local = _as_local(end)
+        if end_local < start_local:
+            raise BadRequestException(
+                message="Khoảng thời gian truy vấn không hợp lệ: end phải không được nhỏ hơn start.",
+                error_code="EDGE_HISTORY_RANGE_INVALID",
+                details={"start": start.isoformat(), "end": end.isoformat()},
+            )
+        if end_local - start_local > HISTORY_MAX_RANGE:
+            raise BadRequestException(
+                message=(
+                    "Khoảng thời gian truy vấn quá lớn, tối đa "
+                    f"{HISTORY_MAX_RANGE.days} ngày cho một lần lấy lịch sử."
+                ),
+                error_code="EDGE_HISTORY_RANGE_TOO_LARGE",
+                details={
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "max_days": HISTORY_MAX_RANGE.days,
+                },
+            )
+
+        window_start = start_local.replace(minute=0, second=0, microsecond=0)
+        window_end = end_local.replace(minute=0, second=0, microsecond=0)
+        profiles = _load_hour_profiles(session, edge.edge_code)
+
+        buckets: list[EdgeHourlyBucket] = []
+        cursor = window_start
+        while cursor < window_end:
+            buckets.append(_hour_bucket(cursor, profiles.get((cursor.hour, cursor.weekday()))))
+            cursor += timedelta(hours=1)
+
+        return EdgeHourlyHistoryResponse(
+            edge_id=edge.edge_id,
+            edge_code=edge.edge_code,
+            street_name=edge.street_name,
+            length_km=edge.length_km,
+            max_speed_limit=edge.max_speed_limit,
+            start=window_start,
+            end=window_end,
+            granularity="1h",
+            timezone=str(LOCAL_TZ),
+            data_source="typical_week_profile",
+            total_hours=len(buckets),
+            hours_with_data=sum(1 for b in buckets if b.sample_count > 0),
+            buckets=buckets,
+        )
 
     @staticmethod
     def get_all_edges(session: Session) -> list[Edge]:
