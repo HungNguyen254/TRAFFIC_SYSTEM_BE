@@ -13,6 +13,10 @@ def validate_password_strength(password: str) -> str:
         raise ValueError("Mật khẩu phải có ít nhất 1 ký tự đặc biệt.")
     return password
 
+def validate_password_strength(password: str, confirm_password: str) -> bool:
+    if password.lower() != confirm_password.lower():
+        raise ValueError("Mật khẩu không khớp.")
+    return True
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -24,7 +28,11 @@ class RegisterRequest(BaseModel):
     @classmethod
     def password_must_be_strong(cls, password: str) -> str:
         return validate_password_strength(password)
-
+    
+    @field_validator("confirm_password")
+    @classmethod
+    def confirm_password_must_be_equal_to_password(cls, password: str, confirm_password: str) -> str:
+        return validate_password_strength(password,confirm_password)
 
 class LoginRequest(BaseModel):
     email: EmailStr
