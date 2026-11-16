@@ -1,3 +1,4 @@
+import time
 import uuid
 from dataclasses import dataclass
 from itertools import pairwise
@@ -11,6 +12,13 @@ from app.models.node import Node
 from app.schemas.routing import RouteResult, RouteStep, WeightMode
 
 MIN_SPEED_KMH = 1.0
+GRAPH_CACHE_TTL_SECONDS = 300.0
+_GRAPH_CACHE: dict[WeightMode, tuple[float, "TrafficGraph"]] = {}
+
+
+def clear_graph_cache() -> None:
+    """Clear all cached traffic graphs from memory."""
+    _GRAPH_CACHE.clear()
 
 
 @dataclass(frozen=True)
@@ -27,8 +35,21 @@ def _cheapest_edge(network: nx.MultiDiGraph, start: uuid.UUID, end: uuid.UUID) -
     return min(network[start][end].values(), key=lambda attrs: attrs["weight"])
 
 
-def build_graph(session: Session, weight_mode: WeightMode = "distance") -> TrafficGraph:
-    """Build a road graph whose edge cost is km, or minutes from legal limits in duration mode."""
+def build_graph(
+    session: Session,
+    weight_mode: WeightMode = "distance",
+    force_refresh: bool = False,
+    ttl_seconds: float = GRAPH_CACHE_TTL_SECONDS,
+) -> TrafficGraph:
+    """Build a road graph whose edge cost is km, or minutes from legal limits in duration mode.
+    
+    Caches built graphs in memory by weight_mode to avoid redundant full-table DB scans.
+    """
+    now = time.monotonic()
+    if not force_refresh and weight_mode in _GRAPH_CACHE:
+        cached_time, cached_graph = _GRAPH_CACHE[weight_mode]
+        if now - cached_time < ttl_seconds:
+            return cached_graph
     nodes = list(session.exec(select(Node)).all())
     if not nodes:
         raise NotFoundException(
@@ -75,12 +96,14 @@ def build_graph(session: Session, weight_mode: WeightMode = "distance") -> Traff
             weight=weight,
         )
 
-    return TrafficGraph(
+    traffic_graph = TrafficGraph(
         network=network,
         node_count=network.number_of_nodes(),
         edge_count=network.number_of_edges(),
         skipped_edge_count=skipped,
     )
+    _GRAPH_CACHE[weight_mode] = (now, traffic_graph)
+    return traffic_graph
 
 
 def find_route(

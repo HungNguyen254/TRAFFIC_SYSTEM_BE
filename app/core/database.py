@@ -36,10 +36,39 @@ engine = create_engine(
 )
 
 
+def _apply_schema_patches() -> None:
+    """Ensure missing columns in existing tables are added if tables existed before schema updates."""
+    from sqlalchemy import inspect
+    from app.core.crypto import generate_salt
+
+    try:
+        inspector = inspect(engine)
+        if inspector.has_table("users"):
+            user_cols = {c["name"] for c in inspector.get_columns("users")}
+            if "encryption_salt" not in user_cols:
+                logger.info("Applying schema patch: adding missing 'encryption_salt' to 'users' table...")
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN encryption_salt VARCHAR(64)")
+                    )
+                    rows = conn.execute(
+                        text("SELECT user_id FROM users WHERE encryption_salt IS NULL")
+                    ).fetchall()
+                    for r in rows:
+                        conn.execute(
+                            text("UPDATE users SET encryption_salt = :salt WHERE user_id = :uid"),
+                            {"salt": generate_salt(), "uid": r[0]},
+                        )
+                logger.info("Schema patch for 'users.encryption_salt' applied successfully.")
+    except Exception as exc:
+        logger.warning("Schema patch check encountered an error: %s", exc)
+
+
 def init_db() -> None:
-    """Create all database tables defined in SQLModel metadata."""
+    """Create all database tables defined in SQLModel metadata and run minor schema patches."""
     import app.models
     SQLModel.metadata.create_all(engine)
+    _apply_schema_patches()
 
 
 def check_db_connection() -> bool:

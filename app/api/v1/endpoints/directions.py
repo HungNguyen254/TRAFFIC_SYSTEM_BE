@@ -21,9 +21,9 @@ router = APIRouter(prefix="/directions", tags=["directions"])
 def get_directions(
     request: Request,
     session: SessionDep,
-    origin_node_id: uuid.UUID = Query(description="Nút giao chứa điểm đi"),
-    destination_node_id: uuid.UUID = Query(description="Nút giao chứa điểm đến"),
-    weight_mode: WeightMode = Query(
+    origin_node_id: uuid.UUID = Query(description="Nút giao chứa điểm đi"),  # noqa: B008
+    destination_node_id: uuid.UUID = Query(description="Nút giao chứa điểm đến"),  # noqa: B008
+    weight_mode: WeightMode = Query(  # noqa: B008
         "distance",
         description="distance = ưu tiên ngắn nhất theo km, duration = ưu tiên nhanh nhất theo phút",
     ),
@@ -31,6 +31,4 @@ def get_directions(
     """Return the best route between two intersections as a standard envelope."""
     graph = build_graph(session, weight_mode)
     route = find_route(graph, origin_node_id, destination_node_id)
-    return success_response(
-        request=request, message="Tìm tuyến thành công", data=route
-    )
+    return success_response(request=request, message="Tìm tuyến thành công", data=route)
