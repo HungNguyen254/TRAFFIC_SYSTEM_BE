@@ -89,7 +89,7 @@ def evaluate_and_compare_models(
 def train_model(
     session: Session | None = None,
     model_name: str = DEFAULT_MODEL_NAME,
-    save_file_path: Path | str | None = DEFAULT_MODEL_FILE_PATH,
+    save_file_path: Path | str | None = None,
 ) -> tuple[RandomForestRegressor, MLModel, dict]:
     init_db()
 
@@ -163,11 +163,10 @@ def train_model(
         model.fit(X, y)
 
         # Save model file to disk if requested (prevent in-memory test sessions from clobbering production file)
-        should_save_file = save_file_path is not None and (
-            owns_session or save_file_path != DEFAULT_MODEL_FILE_PATH
-        )
-        if should_save_file:
-            out_file = Path(save_file_path)
+        target_path = save_file_path if save_file_path is not None else DEFAULT_MODEL_FILE_PATH
+        should_save = (save_file_path is not None) or (owns_session and target_path is not None)
+        if should_save and target_path:
+            out_file = Path(target_path)
             out_file.parent.mkdir(parents=True, exist_ok=True)
             joblib.dump(model, out_file, compress=3)
             logger.info("Persisted model file to %s", out_file)

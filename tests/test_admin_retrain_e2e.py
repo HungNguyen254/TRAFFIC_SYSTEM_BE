@@ -6,12 +6,16 @@ from app.models.traffic_data import TrafficData
 from app.services.prediction_service import PredictionService
 
 
-def test_admin_retrain_flow(monkeypatch):
+def test_admin_retrain_flow(monkeypatch, tmp_path):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr("app.core.database.engine", engine)
     monkeypatch.setattr("scripts.train_prediction_model.engine", engine)
     monkeypatch.setattr("app.services.prediction_service.engine", engine)
+    monkeypatch.setattr(
+        "scripts.train_prediction_model.DEFAULT_MODEL_FILE_PATH",
+        tmp_path / "traffic_model.joblib",
+    )
 
     # Seed some traffic data
     with Session(engine) as session:
