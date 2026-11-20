@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, ValidationInfo, field_validator
 
 
 def validate_password_strength(password: str) -> str:
@@ -13,10 +13,10 @@ def validate_password_strength(password: str) -> str:
         raise ValueError("Mật khẩu phải có ít nhất 1 ký tự đặc biệt.")
     return password
 
-def validate_password_strength(password: str, confirm_password: str) -> bool:
-    if password.lower() != confirm_password.lower():
+def validate_confirm_password(password: str, confirm_password: str) -> str:
+    if password != confirm_password:
         raise ValueError("Mật khẩu không khớp.")
-    return True
+    return confirm_password
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -31,8 +31,13 @@ class RegisterRequest(BaseModel):
     
     @field_validator("confirm_password")
     @classmethod
-    def confirm_password_must_be_equal_to_password(cls, password: str, confirm_password: str) -> str:
-        return validate_password_strength(password,confirm_password)
+    def confirm_password_must_be_equal_to_password(cls, confirm_password: str, info: ValidationInfo) -> str:
+        password = info.data.get("password")
+        # If password failed its own validation it is absent from info.data,
+        # so there is nothing to compare against here.
+        if password is None:
+            return confirm_password
+        return validate_confirm_password(password, confirm_password)
 
 class LoginRequest(BaseModel):
     email: EmailStr
