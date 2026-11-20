@@ -5,7 +5,76 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.models.ml_model import MLModel
 from app.models.traffic_data import TrafficData
-from scripts.train_prediction_model import train_model
+from scripts.train_prediction_model import evaluate_and_compare_models, train_model
+import numpy as np
+
+
+def test_evaluate_and_compare_models():
+    # Generate simple regression dataset where target has non-linear and linear relationships
+    np.random.seed(42)
+    X = np.random.uniform(1.0, 10.0, size=(100, 7)).astype(np.float32)
+    # y depends strongly on features with small noise
+    y = (2.0 * X[:, 0] + 0.5 * (X[:, 1] ** 2) + np.random.normal(0, 0.5, size=100)).astype(np.float32)
+
+    results = evaluate_and_compare_models(X, y, test_size=0.2, random_state=42)
+
+    assert "baseline" in results
+    assert "linear_regression" in results
+    assert "random_forest" in results
+
+    assert "mae" in results["baseline"]
+    assert "mae" in results["linear_regression"]
+    assert "mae" in results["random_forest"]
+
+    # Random forest or linear regression should have lower MAE than mean baseline
+    assert results["random_forest"]["mae"] < results["baseline"]["mae"]
+    assert "rmse" in results["random_forest"]
+    assert "r2" in results["random_forest"]
+
+
+def test_train_model_saves_file_and_evaluates_metrics(tmp_path: Path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+
+    save_path = tmp_path / "models" / "traffic_model.joblib"
+
+    with Session(engine) as session:
+        for i in range(25):
+            session.add(
+                TrafficData(
+                    edge_code=f"EDGE_{i%4}",
+                    street_name="Pho Hue",
+                    length_km=1.5,
+                    max_speed_limit=50,
+                    hour_of_day=i % 24,
+                    day_of_week=i % 7,
+                    is_weekend=1 if (i % 7) in (5, 6) else 0,
+                    is_rush_hour=1 if 7 <= (i % 24) <= 9 else 0,
+                    weather_code=0.0,
+                    average_speed=30.0 - (i % 10),
+                    congestion_level=2,
+                    risk_factor=0.4,
+                )
+            )
+        session.commit()
+
+        model, db_model, metrics = train_model(session=session, save_file_path=save_path)
+        assert model is not None
+        assert db_model is not None
+        assert db_model.is_active is True
+        assert save_path.exists()
+
+        # Verify joblib file load
+        loaded_model = joblib.load(save_path)
+        sample_input = np.array([[12.0, 2.0, 0.0, 0.0, 0.0, 1.5, 50.0]], dtype=np.float32)
+        pred = loaded_model.predict(sample_input)
+        assert len(pred) == 1
+        assert pred[0] > 0
+
+        # Verify metrics recorded in DB
+        assert "mae" in db_model.metrics
+        assert "baseline_mae" in db_model.metrics
+        assert db_model.metrics["mae"] == metrics["random_forest"]["mae"]
 
 
 def test_train_model_from_database_and_save_to_db():
@@ -34,7 +103,7 @@ def test_train_model_from_database_and_save_to_db():
         session.commit()
 
         # Run training
-        model, db_model = train_model(session=session)
+        model, db_model, *rest = train_model(session=session)
         assert model is not None
         assert db_model is not None
         assert db_model.is_active is True
@@ -45,7 +114,7 @@ def test_train_model_from_database_and_save_to_db():
         assert loaded_rf is not None
 
         # Train second time: verify version increment and active deactivation
-        model2, db_model2 = train_model(session=session)
+        model2, db_model2, *rest = train_model(session=session)
         assert db_model2.version == 2
         assert db_model2.is_active is True
 
@@ -73,7 +142,7 @@ def test_train_model_auto_seeds_when_traffic_data_empty(monkeypatch, tmp_path: P
         count = session.exec(select(TrafficData)).all()
         assert len(count) == 0
 
-        model, db_model = train_model(session=session)
+        model, db_model, *rest = train_model(session=session)
         assert model is not None
         assert db_model.is_active is True
 
