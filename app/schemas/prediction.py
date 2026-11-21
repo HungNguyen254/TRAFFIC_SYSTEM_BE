@@ -59,10 +59,22 @@ class MapForecastEdge(BaseModel):
     risk_factor: float
     congestion_level: int = Field(ge=1, le=4)
     description: str
+    ensemble_agreement: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description=(
+            "Điểm đồng thuận chuẩn hóa theo độ phân tán giữa các cây Random Forest; "
+            "không phải xác suất dự báo đúng."
+        ),
+    )
 
 
 class MapForecastResponse(BaseModel):
     minutes_ahead: int
     base_time: datetime
     target_time: datetime
+    prediction_source: Literal["machine_learning", "heuristic"] = Field(
+        description="Nguồn tạo dự báo: mô hình học máy hoặc quy tắc dự phòng.",
+    )
     edges: list[MapForecastEdge]

@@ -90,6 +90,59 @@ class PredictionService:
             return 1.0
         return 0.0
 
+    @staticmethod
+    def _build_prediction_features(
+        edge: Edge,
+        hour_of_day: int,
+        day_of_week: int,
+        weather: str,
+    ) -> np.ndarray:
+        is_weekend = 1.0 if day_of_week in (5, 6) else 0.0
+        is_rush_hour = 1.0 if (7 <= hour_of_day <= 9 or 17 <= hour_of_day <= 19) else 0.0
+        return np.array(
+            [
+                [
+                    float(hour_of_day),
+                    float(day_of_week),
+                    is_weekend,
+                    is_rush_hour,
+                    PredictionService._weather_to_code(weather),
+                    float(edge.length_km),
+                    float(edge.max_speed_limit),
+                ]
+            ],
+            dtype=np.float32,
+        )
+
+    @classmethod
+    def _compute_ensemble_agreement(
+        cls,
+        edge: Edge,
+        hour_of_day: int,
+        day_of_week: int,
+        weather: str,
+    ) -> float | None:
+        estimators = getattr(cls._model, "estimators_", None)
+        if estimators is None or len(estimators) < 2:
+            return None
+
+        features = cls._build_prediction_features(
+            edge=edge,
+            hour_of_day=hour_of_day,
+            day_of_week=day_of_week,
+            weather=weather,
+        )
+        tree_predictions = np.asarray(
+            [float(estimator.predict(features)[0]) for estimator in estimators],
+            dtype=np.float64,
+        )
+        if not np.isfinite(tree_predictions).all():
+            return None
+
+        speed_limit = max(float(edge.max_speed_limit), 1.0)
+        dispersion = float(np.std(tree_predictions)) / speed_limit
+        return round(max(0.0, min(1.0, 1.0 - dispersion)), 3)
+
     @classmethod
     def _compute_prediction_values(
         cls,
@@ -104,19 +157,11 @@ class PredictionService:
 
         model = cls._model
         if model is not None:
-            features = np.array(
-                [
-                    [
-                        float(hour_of_day),
-                        float(day_of_week),
-                        is_weekend,
-                        is_rush_hour,
-                        weather_code,
-                        float(edge.length_km),
-                        float(edge.max_speed_limit),
-                    ]
-                ],
-                dtype=np.float32,
+            features = cls._build_prediction_features(
+                edge=edge,
+                hour_of_day=hour_of_day,
+                day_of_week=day_of_week,
+                weather=weather,
             )
             predicted_speed = float(model.predict(features)[0])
         else:
@@ -300,6 +345,12 @@ class PredictionService:
                 day_of_week=local_target.weekday(),
                 weather=payload.weather,
             )
+            ensemble_agreement = cls._compute_ensemble_agreement(
+                edge=edge,
+                hour_of_day=local_target.hour,
+                day_of_week=local_target.weekday(),
+                weather=payload.weather,
+            )
             forecast_edges.append(
                 MapForecastEdge(
                     edge_id=edge.edge_id,
@@ -309,6 +360,7 @@ class PredictionService:
                     risk_factor=risk,
                     congestion_level=level,
                     description=description,
+                    ensemble_agreement=ensemble_agreement,
                 )
             )
 
@@ -316,5 +368,6 @@ class PredictionService:
             minutes_ahead=payload.minutes_ahead,
             base_time=base_time,
             target_time=target_time,
+            prediction_source="machine_learning" if cls._model is not None else "heuristic",
             edges=forecast_edges,
         )
