@@ -8,6 +8,8 @@ from app.schemas.prediction import (
     MapForecastResponse,
     PredictionRequest,
     PredictionResponse,
+    RouteForecastRequest,
+    RouteForecastResponse,
 )
 from app.services.prediction_service import PredictionService
 
@@ -29,6 +31,26 @@ def get_traffic_forecast(
     result = PredictionService.get_forecast(session, payload)
     return success_response(
         request=request, message="Dự báo tình trạng giao thông thành công", data=result
+    )
+
+
+@router.post(
+    "/forecast/route",
+    response_model=StandardResponse[RouteForecastResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Dự báo ETA theo từng đoạn của một tuyến đường",
+)
+@limiter.limit("10/minute")
+def get_route_traffic_forecast(
+    request: Request,
+    payload: RouteForecastRequest,
+    session: SessionDep,
+):
+    result = PredictionService.get_route_forecast(session, payload)
+    return success_response(
+        request=request,
+        message="Dự báo ETA tuyến đường thành công",
+        data=result,
     )
 
 

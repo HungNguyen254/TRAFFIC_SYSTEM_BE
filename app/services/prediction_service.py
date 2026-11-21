@@ -1,5 +1,6 @@
 import io
 import logging
+import math
 import threading
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,9 @@ from app.schemas.prediction import (
     PredictionRequest,
     PredictionResponse,
     PredictionTimelineItem,
+    RouteForecastRequest,
+    RouteForecastResponse,
+    RouteForecastStepResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -326,6 +330,69 @@ class PredictionService:
             weather=payload.weather,
             timeline=timeline_items,
             updated_at=now,
+        )
+
+    @classmethod
+    def get_route_forecast(
+        cls, session: Session, payload: RouteForecastRequest
+    ) -> RouteForecastResponse:
+        edge_ids = [step.edge_id for step in payload.steps]
+        edges = session.exec(select(Edge).where(Edge.edge_id.in_(edge_ids))).all()
+        edges_by_id = {edge.edge_id: edge for edge in edges}
+        missing_edge_ids = [edge_id for edge_id in edge_ids if edge_id not in edges_by_id]
+        if missing_edge_ids:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Không tìm thấy đoạn đường trong tuyến cần dự báo.",
+            )
+
+        base_time = payload.base_time
+        elapsed_minutes = 0.0
+        predicted_steps: list[RouteForecastStepResponse] = []
+        for request_step in payload.steps:
+            edge = edges_by_id[request_step.edge_id]
+            offset = max(
+                1,
+                math.ceil(elapsed_minutes + request_step.baseline_travel_min / 2),
+            )
+            if offset > 1440:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Thời gian dự kiến vượt quá phạm vi dự báo 24 giờ.",
+                )
+
+            target_time = base_time + timedelta(minutes=offset)
+            if target_time.tzinfo is None:
+                local_target = target_time.replace(tzinfo=UTC).astimezone(LOCAL_TZ)
+            else:
+                local_target = target_time.astimezone(LOCAL_TZ)
+
+            speed, _, congestion_level, _ = cls._compute_prediction_values(
+                edge=edge,
+                hour_of_day=local_target.hour,
+                day_of_week=local_target.weekday(),
+                weather=payload.weather,
+            )
+            predicted_minutes = float(edge.length_km) / speed * 60
+            elapsed_minutes += predicted_minutes
+            predicted_steps.append(
+                RouteForecastStepResponse(
+                    edge_id=edge.edge_id,
+                    street_name=edge.street_name,
+                    length_km=edge.length_km,
+                    predicted_speed=speed,
+                    predicted_minutes=predicted_minutes,
+                    congestion_level=congestion_level,
+                    minutes_ahead=offset,
+                    target_time=target_time,
+                )
+            )
+
+        return RouteForecastResponse(
+            base_time=base_time,
+            weather=payload.weather,
+            predicted_duration_min=elapsed_minutes,
+            steps=predicted_steps,
         )
 
     @classmethod

@@ -46,6 +46,35 @@ class PredictionResponse(BaseModel):
     updated_at: datetime
 
 
+class RouteForecastStepRequest(BaseModel):
+    edge_id: uuid.UUID
+    baseline_travel_min: Annotated[float, Field(ge=0, le=1440)]
+
+
+class RouteForecastRequest(BaseModel):
+    base_time: datetime
+    weather: str = "sunny"
+    steps: list[RouteForecastStepRequest] = Field(min_length=1, max_length=100)
+
+
+class RouteForecastStepResponse(BaseModel):
+    edge_id: uuid.UUID
+    street_name: str
+    length_km: float
+    predicted_speed: float
+    predicted_minutes: float
+    congestion_level: int = Field(ge=1, le=4)
+    minutes_ahead: int
+    target_time: datetime
+
+
+class RouteForecastResponse(BaseModel):
+    base_time: datetime
+    weather: str
+    predicted_duration_min: float
+    steps: list[RouteForecastStepResponse]
+
+
 class MapForecastRequest(BaseModel):
     minutes_ahead: Literal[30, 60]
     weather: str = "sunny"

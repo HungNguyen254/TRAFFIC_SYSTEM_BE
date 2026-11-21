@@ -371,6 +371,14 @@ Toàn bộ các phản hồi từ API (cả thành công lẫn thất bại) đ�
 | | `DELETE`| `/api/v1/edges/{edge_id}` | **Admin** | - | Xóa đoạn đường khỏi hệ thống |
 | **Routing**| `GET` | `/api/v1/directions` | Public | 20 req/phút | Tìm đường tối ưu (`distance` hoặc `duration`) |
 | **Predict**| `POST` | `/api/v1/predictions/forecast`| Public | 10 req/phút | Dự báo dòng thời gian tắc đường tương lai |
+| | `POST` | `/api/v1/predictions/forecast/route` | Public | 10 req/phút | Tính ETA dự báo cho toàn bộ các đoạn của một tuyến |
+| **Admin** | `GET` | `/api/v1/admin/roads` | **Admin** | 30 req/phút | Lấy danh sách đoạn đường và khu vực |
+| | `POST` | `/api/v1/admin/roads` | **Admin** | 10 req/phút | Tạo đoạn đường từ danh sách tọa độ |
+| | `PUT` | `/api/v1/admin/roads/{edge_id}` | **Admin** | 10 req/phút | Cập nhật đoạn đường đã vẽ |
+| | `DELETE` | `/api/v1/admin/roads/{edge_id}` | **Admin** | 10 req/phút | Xóa đoạn đường đã quản trị |
+| **Admin** | `GET` | `/api/v1/admin/users` | **Admin** | 30 req/phút | Tìm tài khoản theo tên hoặc email |
+| | `PUT` | `/api/v1/admin/users/{user_id}` | **Admin** | 10 req/phút | Cập nhật tên, email hoặc vai trò |
+| | `DELETE` | `/api/v1/admin/users/{user_id}` | **Admin** | 10 req/phút | Xóa tài khoản và dữ liệu chat |
 | **Admin** | `POST` | `/api/v1/admin/retrain-model` | **Admin** | 2 req/phút | Kích hoạt huấn luyện lại mô hình AI ngầm |
 
 ---
@@ -625,9 +633,40 @@ curl -X GET "http://127.0.0.1:8000/api/v1/directions?origin_node_id=11111111-111
 }
 ```
 
+##### `POST /api/v1/predictions/forecast/route`
+- **Mục đích**: Tính ETA dự báo cho các đoạn theo thứ tự trên một tuyến. Thời điểm dự báo mỗi đoạn được tính từ thời gian dự kiến tích lũy trước đó; gửi cả tuyến trong một request để tránh gọi API riêng lẻ cho từng đoạn.
+- **Request Body**:
+```json
+{
+  "base_time": "2026-11-14T17:00:00Z",
+  "weather": "rain",
+  "steps": [
+    {
+      "edge_id": "7ac18c89-c439-4d64-8898-75b8e97f0eb9",
+      "baseline_travel_min": 8.5
+    }
+  ]
+}
+```
+- **Giới hạn**: 1–100 đoạn; tối đa 10 request/phút. `baseline_travel_min` lấy từ kết quả định tuyến và được dùng để chọn mốc dự báo ở giữa đoạn.
+- **Dữ liệu trả về**: `data.predicted_duration_min` là ETA tổng; `data.steps` chứa tốc độ, thời gian, mức ùn tắc và thời điểm dự báo của từng đoạn theo đúng thứ tự đầu vào.
+
 ---
 
 #### Quản trị viên (Admin Tasks)
+
+##### `/api/v1/admin/users`
+- **Mục đích**: Tìm kiếm tài khoản, cập nhật tên/email/vai trò hoặc xóa tài khoản.
+- **Quyền hạn**: Bắt buộc tài khoản có quyền `role: "admin"`.
+- **Bảo vệ tài khoản**: Không thể tự xóa/hạ quyền admin đang đăng nhập hoặc xóa/hạ quyền admin cuối cùng. Cập nhật tài khoản tăng `token_version` để vô hiệu hóa các JWT hiện có; xóa tài khoản cũng xóa lịch sử chat của tài khoản đó.
+- **Giới hạn gọi**: Tìm kiếm tối đa 30 lần/phút; cập nhật/xóa tối đa 10 lần/phút.
+
+##### `/api/v1/admin/roads`
+- **Mục đích**: Liệt kê, tạo, cập nhật và xóa đoạn đường được vẽ từ các tọa độ trên bản đồ.
+- **Quyền hạn**: Bắt buộc tài khoản có quyền `role: "admin"`.
+- **Payload tạo/cập nhật**: `edge_code`, `street_name`, `district`, `max_speed_limit` và `coordinates` (ít nhất hai điểm `{lat, lng}`).
+- **Cơ chế lưu**: Backend tính chiều dài tuyến, lưu hình học GeoJSON và tạo các nút giao đầu/cuối. Khi cập nhật hoặc xóa, nút cũ chỉ bị xóa nếu không còn đoạn đường nào tham chiếu.
+- **Giới hạn gọi**: Đọc tối đa 30 lần/phút; tạo, cập nhật hoặc xóa tối đa 10 lần/phút.
 
 ##### `POST /api/v1/admin/retrain-model`
 - **Mục đích**: Kích hoạt quy trình huấn luyện lại mô hình ML dự báo giao thông trong nền (**BackgroundTasks**).
@@ -848,6 +887,10 @@ Hệ thống áp dụng kiến trúc bảo vệ nhiều lớp nhằm chống t�
 | `/api/v1/auth/login` | `5/minute` | Chống tấn công dò mật khẩu (Brute-force) |
 | `/api/v1/auth/change-password` | `5/minute` | Bảo vệ tài khoản người dùng |
 | `/api/v1/admin/retrain-model` | `2/minute` | Chống quá tải CPU/RAM khi huấn luyện AI |
+| `/api/v1/admin/roads` (GET) | `30/minute` | Giới hạn đọc danh sách đường quản trị |
+| `/api/v1/admin/roads` (POST/PUT/DELETE) | `10/minute` | Giới hạn thay đổi mạng lưới đường |
+| `/api/v1/admin/users` (GET) | `30/minute` | Giới hạn tìm kiếm tài khoản quản trị |
+| `/api/v1/admin/users` (PUT/DELETE) | `10/minute` | Giới hạn thay đổi tài khoản quản trị |
 | `/api/v1/predictions/forecast` | `10/minute` | Tối ưu hóa tài nguyên tính toán inference |
 | `/api/v1/directions` | `20/minute` | Tránh nghẽn tính toán Dijkstra liên tục |
 | `/api/v1/edges/status` | `60/minute` | Hỗ trợ polling cập nhật bản đồ thời gian thực |

@@ -1,4 +1,6 @@
+import json
 import logging
+import math
 import threading
 import unicodedata
 import uuid
@@ -7,7 +9,7 @@ from functools import lru_cache
 from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlmodel import Session, select
 
 from app.core.database import engine
@@ -15,6 +17,12 @@ from app.core.exceptions import BadRequestException, NotFoundException
 from app.models.edge import Edge
 from app.models.node import Node
 from app.models.traffic_data import TrafficData
+from app.schemas.admin_road import (
+    AdminRoadCoordinate,
+    AdminRoadListResponse,
+    AdminRoadPayload,
+    AdminRoadResponse,
+)
 from app.schemas.edge_history import EdgeHourlyBucket, EdgeHourlyHistoryResponse
 from app.schemas.edge_status import EdgeStatusItem, EdgeStatusResponse, NodeBrief
 from app.schemas.traffic import EdgeCreate, EdgeUpdate
@@ -465,6 +473,236 @@ class TrafficService:
         session.commit()
 
     @classmethod
+    def get_admin_roads(cls, session: Session) -> AdminRoadListResponse:
+        nodes = list(session.exec(select(Node)).all())
+        nodes_by_id = {node.node_id: node for node in nodes}
+        edges = session.exec(select(Edge).order_by(Edge.edge_code)).all()
+        roads = [
+            cls._admin_road_response(edge, nodes_by_id)
+            for edge in edges
+        ]
+        districts = sorted(
+            {node.district.strip() for node in nodes if node.district.strip()},
+            key=str.casefold,
+        )
+        return AdminRoadListResponse(roads=roads, districts=districts)
+
+    @staticmethod
+    def _admin_road_response(
+        edge: Edge, nodes_by_id: dict[uuid.UUID, Node]
+    ) -> AdminRoadResponse:
+        from_node = nodes_by_id.get(edge.from_node_id)
+        to_node = nodes_by_id.get(edge.to_node_id)
+        if from_node is None or to_node is None:
+            raise NotFoundException(
+                message=f"Không tìm thấy nút giao của đoạn đường {edge.edge_code}.",
+                error_code="ROAD_NODE_NOT_FOUND",
+            )
+
+        coordinates = None
+        if edge.geom:
+            try:
+                geometry = json.loads(edge.geom)
+                if isinstance(geometry, dict) and geometry.get("type") == "LineString":
+                    raw_coordinates = geometry.get("coordinates")
+                else:
+                    raw_coordinates = None
+                if isinstance(raw_coordinates, list):
+                    parsed = []
+                    for point in raw_coordinates:
+                        if not isinstance(point, list) or len(point) < 2:
+                            parsed = []
+                            break
+                        lng, lat = float(point[0]), float(point[1])
+                        if (
+                            not math.isfinite(lat)
+                            or not math.isfinite(lng)
+                            or not -90 <= lat <= 90
+                            or not -180 <= lng <= 180
+                        ):
+                            parsed = []
+                            break
+                        parsed.append(AdminRoadCoordinate(lat=lat, lng=lng))
+                    if len(parsed) >= 2:
+                        coordinates = parsed
+            except (TypeError, ValueError, json.JSONDecodeError):
+                coordinates = None
+
+        if coordinates is None:
+            coordinates = [
+                AdminRoadCoordinate(
+                    lat=from_node.latitude,
+                    lng=from_node.longitude,
+                ),
+                AdminRoadCoordinate(lat=to_node.latitude, lng=to_node.longitude),
+            ]
+
+        return AdminRoadResponse(
+            edge_id=edge.edge_id,
+            edge_code=edge.edge_code,
+            street_name=edge.street_name,
+            district=from_node.district,
+            max_speed_limit=edge.max_speed_limit,
+            length_km=edge.length_km,
+            coordinates=coordinates,
+        )
+
+    @staticmethod
+    def _admin_road_node(
+        session: Session,
+        road: AdminRoadPayload,
+        coordinate: AdminRoadCoordinate,
+        position: str,
+    ) -> Node:
+        while True:
+            node_code = f"ADM{uuid.uuid4().hex[:16]}{position}"
+            if not session.exec(
+                select(Node.node_id).where(Node.node_code == node_code)
+            ).first():
+                break
+
+        return Node(
+            node_code=node_code,
+            node_name=f"{road.street_name[:90]} ({'đầu' if position == 'A' else 'cuối'})",
+            district=road.district,
+            latitude=coordinate.lat,
+            longitude=coordinate.lng,
+        )
+
+    @staticmethod
+    def _admin_road_geometry(road: AdminRoadPayload) -> str:
+        return json.dumps(
+            {
+                "type": "LineString",
+                "coordinates": [
+                    [coordinate.lng, coordinate.lat]
+                    for coordinate in road.coordinates
+                ],
+            },
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _admin_road_length_km(road: AdminRoadPayload) -> float:
+        radius_km = 6371.0
+        total = 0.0
+        for start, end in zip(road.coordinates, road.coordinates[1:]):
+            lat1 = math.radians(start.lat)
+            lat2 = math.radians(end.lat)
+            delta_lat = lat2 - lat1
+            delta_lng = math.radians(end.lng - start.lng)
+            haversine = (
+                math.sin(delta_lat / 2) ** 2
+                + math.cos(lat1)
+                * math.cos(lat2)
+                * math.sin(delta_lng / 2) ** 2
+            )
+            total += 2 * radius_km * math.asin(math.sqrt(min(1.0, haversine)))
+        return total
+
+    @staticmethod
+    def _delete_unused_road_nodes(
+        session: Session, node_ids: set[uuid.UUID]
+    ) -> None:
+        for node_id in node_ids:
+            referenced = session.exec(
+                select(Edge.edge_id)
+                .where(
+                    or_(
+                        Edge.from_node_id == node_id,
+                        Edge.to_node_id == node_id,
+                    )
+                )
+                .limit(1)
+            ).first()
+            if referenced is None:
+                node = session.get(Node, node_id)
+                if node is not None:
+                    session.delete(node)
+
+    @classmethod
+    def create_admin_road(
+        cls, session: Session, road: AdminRoadPayload
+    ) -> AdminRoadResponse:
+        cls._ensure_edge_code_available(session, road.edge_code)
+        start_node = cls._admin_road_node(
+            session, road, road.coordinates[0], "A"
+        )
+        end_node = cls._admin_road_node(
+            session, road, road.coordinates[-1], "B"
+        )
+        edge = Edge(
+            edge_code=road.edge_code,
+            street_name=road.street_name,
+            from_node_id=start_node.node_id,
+            to_node_id=end_node.node_id,
+            length_km=cls._admin_road_length_km(road),
+            max_speed_limit=road.max_speed_limit,
+            geom=cls._admin_road_geometry(road),
+        )
+        session.add_all([start_node, end_node, edge])
+        session.commit()
+        session.refresh(edge)
+        return cls._admin_road_response(
+            edge, {start_node.node_id: start_node, end_node.node_id: end_node}
+        )
+
+    @classmethod
+    def update_admin_road(
+        cls, session: Session, edge_id: uuid.UUID, road: AdminRoadPayload
+    ) -> AdminRoadResponse:
+        edge = cls.get_edge_by_id(session, edge_id)
+        if edge is None:
+            raise NotFoundException(
+                message=f"Không tìm thấy đoạn đường có id {edge_id}.",
+                error_code="EDGE_NOT_FOUND",
+                details={"edge_id": str(edge_id)},
+            )
+
+        cls._ensure_edge_code_available(
+            session, road.edge_code, exclude_edge_id=edge_id
+        )
+        old_node_ids = {edge.from_node_id, edge.to_node_id}
+        start_node = cls._admin_road_node(
+            session, road, road.coordinates[0], "A"
+        )
+        end_node = cls._admin_road_node(
+            session, road, road.coordinates[-1], "B"
+        )
+        session.add_all([start_node, end_node])
+        edge.edge_code = road.edge_code
+        edge.street_name = road.street_name
+        edge.from_node_id = start_node.node_id
+        edge.to_node_id = end_node.node_id
+        edge.length_km = cls._admin_road_length_km(road)
+        edge.max_speed_limit = road.max_speed_limit
+        edge.geom = cls._admin_road_geometry(road)
+        session.add(edge)
+        session.flush()
+        cls._delete_unused_road_nodes(session, old_node_ids)
+        session.commit()
+        session.refresh(edge)
+        return cls._admin_road_response(
+            edge, {start_node.node_id: start_node, end_node.node_id: end_node}
+        )
+
+    @classmethod
+    def delete_admin_road(cls, session: Session, edge_id: uuid.UUID) -> None:
+        edge = cls.get_edge_by_id(session, edge_id)
+        if edge is None:
+            raise NotFoundException(
+                message=f"Không tìm thấy đoạn đường có id {edge_id}.",
+                error_code="EDGE_NOT_FOUND",
+                details={"edge_id": str(edge_id)},
+            )
+
+        node_ids = {edge.from_node_id, edge.to_node_id}
+        session.delete(edge)
+        session.flush()
+        cls._delete_unused_road_nodes(session, node_ids)
+        session.commit()
+
+    @classmethod
     def get_edge_traffic_snapshot(
         cls,
         edge: Edge,
@@ -635,6 +873,7 @@ class TrafficService:
                     "street_name": e.street_name,
                     "length_km": e.length_km,
                     "max_speed_limit": e.max_speed_limit,
+                    "geom": e.geom,
                     "from": {
                         "node_code": from_node.node_code if from_node else None,
                         "node_name": from_node.node_name if from_node else None,
