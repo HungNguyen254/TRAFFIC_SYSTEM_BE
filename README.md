@@ -541,6 +541,8 @@ curl -X GET "http://127.0.0.1:8000/api/v1/edges/status?district=Dong%20Da&hour=1
   - `weight_mode`: Chế độ tối ưu hóa:
     - `"distance"`: Ưu tiên **quãng đường ngắn nhất** (tổng km nhỏ nhất).
     - `"duration"`: Ưu tiên **thời gian di chuyển nhanh nhất** (tổng phút nhỏ nhất, tính theo vận tốc cho phép và tình trạng giao thông).
+  - `speed_source`: Nguồn tốc độ để tính ETA: `"limit"` (giới hạn cố định), `"current"` (tốc độ hiện tại, mặc định), `"forecast"` (dự báo AI).
+- **Đánh dấu nguy cơ tắc cao**: mỗi đoạn (`step`) có `congestion_level` (1-4) và cờ `at_risk` = true khi mức ùn tắc từ 3 trở lên. Tuyến trả thêm `risk_segments` (các đoạn nguy cơ, gộp liền kề cùng tên đường/cùng mức) và `risk_warning` (câu cảnh báo tiếng Việt, rỗng nếu tuyến an toàn) để Frontend tô đậm và hiển thị cảnh báo trực quan.
 - **Ví dụ gọi cURL**:
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/directions?origin_node_id=11111111-1111-1111-1111-111111111111&destination_node_id=22222222-2222-2222-2222-222222222222&weight_mode=duration"
@@ -563,7 +565,9 @@ curl -X GET "http://127.0.0.1:8000/api/v1/directions?origin_node_id=11111111-111
         "street_name": "Đường Láng",
         "length_km": 1.2,
         "travel_min": 2.4,
-        "speed_kmh": 30.0
+        "speed_kmh": 30.0,
+        "congestion_level": 2,
+        "at_risk": false
       }
     ],
     "polyline": [
@@ -571,7 +575,17 @@ curl -X GET "http://127.0.0.1:8000/api/v1/directions?origin_node_id=11111111-111
       [105.7985, 21.0332]
     ],
     "total_distance_km": 1.2,
-    "total_duration_min": 2.4
+    "total_duration_min": 2.4,
+    "risk_segments": [
+      {
+        "street_name": "Nguyễn Trãi",
+        "congestion_level": 3,
+        "level_label": "Ùn tắc nghiêm trọng",
+        "edge_ids": ["7ac18c89-..."],
+        "length_km": 1.8
+      }
+    ],
+    "risk_warning": "1 đoạn nguy cơ tắc cao: Nguyễn Trãi (Ùn tắc nghiêm trọng). Nên cân nhắc tuyến thay thế hoặc chờ qua khung giờ cao điểm."
   }
 }
 ```

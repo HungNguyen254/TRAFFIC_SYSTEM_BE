@@ -15,6 +15,15 @@ class RouteStep(BaseModel):
     travel_min: float
     speed_kmh: float
     congestion_level: int | None = None
+    at_risk: bool = False
+
+
+class RiskSegment(BaseModel):
+    street_name: str
+    congestion_level: int
+    level_label: str
+    edge_ids: list[uuid.UUID]
+    length_km: float
 
 
 class RouteResult(BaseModel):
@@ -27,6 +36,8 @@ class RouteResult(BaseModel):
     polyline: list[list[float]]
     total_distance_km: float
     total_duration_min: float
+    risk_segments: list[RiskSegment] = []
+    risk_warning: str = ""
 
 
 class RouteOption(BaseModel):
