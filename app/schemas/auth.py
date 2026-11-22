@@ -54,10 +54,17 @@ class ChangePasswordRequest(BaseModel):
         return validate_password_strength(password)
 
 
+class UpgradePlanResponse(BaseModel):
+    user_id: uuid.UUID
+    plan: str
+    message: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     role: str
+    plan: str = "standard"
     user_id: uuid.UUID
 
 
@@ -66,4 +73,5 @@ class UserResponse(BaseModel):
     email: str
     full_name: str
     role: str
+    plan: str = "standard"
     created_at: datetime

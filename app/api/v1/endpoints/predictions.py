@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from typing import Annotated
 
 from app.core.database import SessionDep
 from app.core.limiter import limiter
 from app.core.response import StandardResponse, success_response
+from app.core.security import get_current_user
+from app.models.user import User
 from app.schemas.prediction import (
     MapForecastRequest,
     MapForecastResponse,
@@ -14,6 +17,18 @@ from app.schemas.prediction import (
 from app.services.prediction_service import PredictionService
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
+
+
+def require_premium_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Tính năng chỉ dành cho tài khoản Premium."""
+    if current_user.plan != "premium":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tính năng này chỉ dành cho tài khoản Premium. Vui lòng nâng cấp gói để sử dụng.",
+        )
+    return current_user
 
 
 @router.post(
@@ -45,6 +60,7 @@ def get_route_traffic_forecast(
     request: Request,
     payload: RouteForecastRequest,
     session: SessionDep,
+    _: Annotated[User, Depends(require_premium_user)],
 ):
     result = PredictionService.get_route_forecast(session, payload)
     return success_response(
@@ -65,6 +81,7 @@ def get_map_traffic_forecast(
     request: Request,
     payload: MapForecastRequest,
     session: SessionDep,
+    _: Annotated[User, Depends(require_premium_user)],
 ):
     result = PredictionService.get_map_forecast(session, payload)
     return success_response(

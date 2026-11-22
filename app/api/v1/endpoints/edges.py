@@ -4,6 +4,7 @@ from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlmodel import Session, select
 
 from app.core.database import SessionDep
 from app.core.limiter import limiter
@@ -18,6 +19,39 @@ from app.services.traffic_service import TrafficService
 router = APIRouter(prefix="/edges", tags=["edges"])
 
 LOCAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+
+def _reject_hour_query_for_standard(request: Request, hour: int | None) -> None:
+    """Tra cứu theo khung giờ (thanh trượt thời gian) là tính năng Premium."""
+    if hour is None:
+        return
+    user = request.state.user if hasattr(request.state, "user") else None
+    if user is None:
+        user = get_optional_user_from_request(request)
+    if user is not None and user.plan != "premium":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Dự báo theo khoảng thời gian chỉ dành cho tài khoản Premium. Vui lòng nâng cấp gói để sử dụng.",
+        )
+
+
+def get_optional_user_from_request(request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    from app.core.security import decode_access_token
+
+    payload = decode_access_token(auth_header.removeprefix("Bearer ").strip())
+    if not payload or "sub" not in payload:
+        return None
+    try:
+        user_id = uuid.UUID(payload["sub"])
+    except ValueError:
+        return None
+    from app.core.database import engine
+
+    with Session(engine) as session:
+        return session.exec(select(User).where(User.user_id == user_id)).first()
 
 
 @router.get(
@@ -58,6 +92,8 @@ def get_edges_status(
         ) from exc
 
     selected_district = district or area
+
+    _reject_hour_query_for_standard(request, hour)
 
     now_local = datetime.now(LOCAL_TZ)
     h = hour if hour is not None else now_local.hour
@@ -119,6 +155,8 @@ def get_edges_with_traffic(
         ) from exc
 
     selected_district = district or area
+
+    _reject_hour_query_for_standard(request, hour)
 
     now_local = datetime.now(LOCAL_TZ)
     h = hour if hour is not None else now_local.hour
