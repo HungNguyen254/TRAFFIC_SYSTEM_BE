@@ -47,6 +47,7 @@ class AuthService:
         return TokenResponse(
             access_token=token,
             role=user.role,
+            plan=user.plan,
             user_id=user.user_id,
         )
 

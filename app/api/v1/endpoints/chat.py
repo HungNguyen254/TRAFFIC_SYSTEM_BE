@@ -138,6 +138,30 @@ async def send_message(
     gemini_service: Annotated[GeminiService, Depends(GeminiService)],
 ) -> StandardResponse[MessageResponse]:
     """Giải mã tin nhắn trong RAM, gọi Gemini API đa lượt, mã hóa câu trả lời và lưu trữ dạng ciphertext."""
+    # Giới hạn chatbot: Standard chỉ 10 tin nhắn/ngày, Premium không giới hạn
+    if current_user.plan != "premium":
+        start_of_day = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        used_today = len(
+            session.exec(
+                select(ChatMessage)
+                .where(
+                    ChatMessage.role == "user",
+                    ChatMessage.created_at >= start_of_day,
+                    ChatMessage.session_id.in_(
+                        select(ChatSession.id).where(ChatSession.user_id == current_user.user_id)
+                    ),
+                )
+            ).all()
+        )
+        if used_today >= 10:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    "Tài khoản Standard chỉ được gửi tối đa 10 tin nhắn chatbot mỗi ngày. "
+                    "Nâng cấp lên Premium để trò chuyện không giới hạn."
+                ),
+            )
+
     chat_session = session.exec(
         select(ChatSession).where(
             ChatSession.id == body.session_id,

@@ -45,6 +45,19 @@ def _apply_schema_patches() -> None:
         inspector = inspect(engine)
         if inspector.has_table("users"):
             user_cols = {c["name"] for c in inspector.get_columns("users")}
+            if "plan" not in user_cols:
+                logger.info("Applying schema patch: adding missing 'plan' column to 'users' table...")
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN plan VARCHAR(20) DEFAULT 'standard' NOT NULL")
+                    )
+                logger.info("Schema patch for 'users.plan' applied successfully.")
+            if "plan_updated_at" not in user_cols:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN plan_updated_at TIMESTAMP WITH TIME ZONE")
+                    )
+                logger.info("Schema patch for 'users.plan_updated_at' applied successfully.")
             if "encryption_salt" not in user_cols:
                 logger.info("Applying schema patch: adding missing 'encryption_salt' to 'users' table...")
                 with engine.begin() as conn:
