@@ -13,6 +13,7 @@ from app.models.edge import Edge
 from app.models.node import Node
 from app.schemas.routing import (
     AlternativesResult,
+    RiskSegment,
     RouteOption,
     RouteResult,
     RouteStep,
@@ -25,8 +26,15 @@ from app.services.traffic_service import TrafficService
 MIN_SPEED_KMH = 1.0
 LOCAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 RISK_CONGESTION_THRESHOLD = 2.5
+RISK_STEP_LEVEL_THRESHOLD = 3
+CONGESTION_LEVEL_LABELS = {
+    1: "Thông thoáng",
+    2: "Di chuyển chậm",
+    3: "Ùn tắc nghiêm trọng",
+    4: "Kẹt xe hoàn toàn",
+}
 GRAPH_CACHE_TTL_SECONDS = 300.0
-_GRAPH_CACHE: dict[WeightMode, tuple[float, "TrafficGraph"]] = {}
+_GRAPH_CACHE: dict[WeightMode, tuple[float, TrafficGraph]] = {}
 
 
 def clear_graph_cache() -> None:
@@ -58,7 +66,7 @@ def build_graph(
     ttl_seconds: float = GRAPH_CACHE_TTL_SECONDS,
 ) -> TrafficGraph:
     """Build a road graph whose edge cost is km, or minutes from legal limits in duration mode.
-    
+
     Caches built graphs in memory by weight_mode to avoid redundant full-table DB scans.
     """
     now = time.monotonic()
@@ -210,6 +218,43 @@ def find_route(
     return _build_route(network, origin_node_id, destination_node_id, node_path)
 
 
+def _mark_route_risk(route: RouteResult) -> None:
+    """Đánh dấu từng đoạn nguy cơ tắc cao và gộp các đoạn liền kề cùng tên đường, cùng mức."""
+    segments: list[RiskSegment] = []
+    for step in route.steps:
+        step.at_risk = (step.congestion_level or 1) >= RISK_STEP_LEVEL_THRESHOLD
+        if not step.at_risk:
+            continue
+        last = segments[-1] if segments else None
+        if (
+            last is not None
+            and last.street_name == step.street_name
+            and last.congestion_level == step.congestion_level
+        ):
+            last.edge_ids.append(step.edge_id)
+            last.length_km = round(last.length_km + step.length_km, 2)
+        else:
+            segments.append(
+                RiskSegment(
+                    street_name=step.street_name,
+                    congestion_level=step.congestion_level,
+                    level_label=CONGESTION_LEVEL_LABELS[step.congestion_level],
+                    edge_ids=[step.edge_id],
+                    length_km=step.length_km,
+                )
+            )
+
+    route.risk_segments = segments
+    if not segments:
+        route.risk_warning = ""
+        return
+    detail = " · ".join(f"{seg.street_name} ({seg.level_label})" for seg in segments)
+    route.risk_warning = (
+        f"{len(segments)} đoạn nguy cơ tắc cao: {detail}. "
+        "Nên cân nhắc tuyến thay thế hoặc chờ qua khung giờ cao điểm."
+    )
+
+
 def apply_speed_source(
     session: Session, route: RouteResult, speed_source: SpeedSource
 ) -> None:
@@ -217,6 +262,7 @@ def apply_speed_source(
     if speed_source == "limit":
         for step in route.steps:
             step.congestion_level = 1
+        _mark_route_risk(route)
         return
 
     now_local = datetime.now(LOCAL_TZ)
@@ -239,6 +285,7 @@ def apply_speed_source(
         step.travel_min = round(step.length_km / speed * 60, 2)
 
     route.total_duration_min = round(sum(step.travel_min for step in route.steps), 2)
+    _mark_route_risk(route)
 
 
 def _route_congestion_level(route: RouteResult) -> float:
@@ -246,7 +293,9 @@ def _route_congestion_level(route: RouteResult) -> float:
     total_min = sum(step.travel_min for step in route.steps)
     if total_min <= 0:
         return 1.0
-    weighted = sum(step.travel_min * (step.congestion_level or 1) for step in route.steps)
+    weighted = sum(
+        step.travel_min * (step.congestion_level or 1) for step in route.steps
+    )
     return round(weighted / total_min, 2)
 
 
