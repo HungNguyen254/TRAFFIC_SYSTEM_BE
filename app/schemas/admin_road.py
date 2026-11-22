@@ -39,6 +39,7 @@ class AdminRoadResponse(BaseModel):
     district: str
     max_speed_limit: int
     length_km: float
+    has_geometry: bool
     coordinates: list[AdminRoadCoordinate]
 
 

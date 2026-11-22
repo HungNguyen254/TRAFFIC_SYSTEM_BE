@@ -54,6 +54,7 @@ def test_admin_road_create_update_delete_manages_its_endpoint_nodes():
         assert json.loads(edge.geom)["coordinates"] == expected_coordinates
         assert len(session.exec(select(Node)).all()) == 2
         assert created.length_km > 0
+        assert created.has_geometry is True
 
         traffic_data = TrafficService.get_edges_with_traffic(
             session, hour_of_day=12, day_of_week=0
@@ -77,6 +78,13 @@ def test_admin_road_create_update_delete_manages_its_endpoint_nodes():
         listing = TrafficService.get_admin_roads(session)
         assert [road.edge_id for road in listing.roads] == [created.edge_id]
         assert listing.districts == ["Cầu Giấy"]
+
+        edge.geom = None
+        session.add(edge)
+        session.commit()
+        road_without_geometry = TrafficService.get_admin_roads(session).roads[0]
+        assert road_without_geometry.has_geometry is False
+        assert len(road_without_geometry.coordinates) == 2
 
         TrafficService.delete_admin_road(session, created.edge_id)
         assert session.exec(select(Edge)).all() == []
