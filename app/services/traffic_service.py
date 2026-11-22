@@ -528,6 +528,7 @@ class TrafficService:
             except (TypeError, ValueError, json.JSONDecodeError):
                 coordinates = None
 
+        has_geometry = coordinates is not None
         if coordinates is None:
             coordinates = [
                 AdminRoadCoordinate(
@@ -544,6 +545,7 @@ class TrafficService:
             district=from_node.district,
             max_speed_limit=edge.max_speed_limit,
             length_km=edge.length_km,
+            has_geometry=has_geometry,
             coordinates=coordinates,
         )
 
