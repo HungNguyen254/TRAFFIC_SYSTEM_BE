@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 import uuid
 from dataclasses import dataclass
@@ -34,12 +36,6 @@ CONGESTION_LEVEL_LABELS = {
     4: "Kẹt xe hoàn toàn",
 }
 GRAPH_CACHE_TTL_SECONDS = 300.0
-_GRAPH_CACHE: dict[WeightMode, tuple[float, TrafficGraph]] = {}
-
-
-def clear_graph_cache() -> None:
-    """Clear all cached traffic graphs from memory."""
-    _GRAPH_CACHE.clear()
 
 
 @dataclass(frozen=True)
@@ -48,6 +44,14 @@ class TrafficGraph:
     node_count: int
     edge_count: int
     skipped_edge_count: int
+
+
+_GRAPH_CACHE: dict[WeightMode, tuple[float, TrafficGraph]] = {}
+
+
+def clear_graph_cache() -> None:
+    """Clear all cached traffic graphs from memory."""
+    _GRAPH_CACHE.clear()
 
 
 def _cheapest_edge(network: nx.Graph, start: uuid.UUID, end: uuid.UUID) -> dict:
@@ -265,9 +269,24 @@ def apply_speed_source(
         _mark_route_risk(route)
         return
 
+    step_edge_ids = [step.edge_id for step in route.steps]
+    edges_map = {}
+    if step_edge_ids:
+        found_edges = session.exec(
+            select(Edge).where(Edge.edge_id.in_(step_edge_ids))
+        ).all()
+        edges_map = {e.edge_id: e for e in found_edges}
+
     now_local = datetime.now(LOCAL_TZ)
     for step in route.steps:
-        edge = session.get(Edge, step.edge_id)
+        edge = edges_map.get(step.edge_id)
+        if edge is None:
+            # Edge might have been deleted while graph cache was active; fallback gracefully
+            step.congestion_level = 1
+            step.speed_kmh = max(MIN_SPEED_KMH, step.speed_kmh or 30.0)
+            step.travel_min = round(step.length_km / step.speed_kmh * 60, 2)
+            continue
+
         if speed_source == "current":
             snapshot = TrafficService.get_edge_traffic_snapshot(
                 edge, now_local.hour, now_local.weekday(), session=session

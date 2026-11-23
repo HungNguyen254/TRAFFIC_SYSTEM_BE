@@ -14,6 +14,7 @@ from app.models.user import User
 from app.schemas.edge_history import EdgeHourlyHistoryResponse
 from app.schemas.edge_status import EdgeStatusResponse, parse_bbox_param
 from app.schemas.traffic import EdgeCreate, EdgeResponse, EdgeUpdate
+from app.services.routing_service import clear_graph_cache
 from app.services.traffic_service import TrafficService
 
 router = APIRouter(prefix="/edges", tags=["edges"])
@@ -28,7 +29,7 @@ def _reject_hour_query_for_standard(request: Request, hour: int | None) -> None:
     user = request.state.user if hasattr(request.state, "user") else None
     if user is None:
         user = get_optional_user_from_request(request)
-    if user is not None and user.plan != "premium":
+    if user is None or user.plan != "premium":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Dự báo theo khoảng thời gian chỉ dành cho tài khoản Premium. Vui lòng nâng cấp gói để sử dụng.",
@@ -215,6 +216,11 @@ def get_edge_hourly_history(
 )
 def get_edge(request: Request, session: SessionDep, edge_id: uuid.UUID):
     edge = TrafficService.get_edge_by_id(session, edge_id)
+    if not edge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Không tìm thấy đoạn đường có id {edge_id}.",
+        )
     return success_response(
         request=request, message="Lấy thông tin đoạn đường thành công", data=edge
     )
@@ -233,6 +239,7 @@ def create_edge(
     _admin: Annotated[User, Depends(get_current_admin)],
 ):
     edge = TrafficService.create_edge(session, payload)
+    clear_graph_cache()
     return success_response(request=request, message="Tạo đoạn đường thành công", data=edge)
 
 
@@ -250,6 +257,7 @@ def update_edge(
     _admin: Annotated[User, Depends(get_current_admin)],
 ):
     edge = TrafficService.update_edge(session, edge_id, payload)
+    clear_graph_cache()
     return success_response(request=request, message="Cập nhật đoạn đường thành công", data=edge)
 
 
@@ -266,4 +274,5 @@ def delete_edge(
     _admin: Annotated[User, Depends(get_current_admin)],
 ):
     TrafficService.delete_edge(session, edge_id)
+    clear_graph_cache()
     return success_response(request=request, message="Xóa đoạn đường thành công", data=None)

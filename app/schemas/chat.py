@@ -23,7 +23,7 @@ class HandshakeResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     session_id: uuid.UUID
-    ciphertext: str = Field(description="Base64 encoded ciphertext of JSON payload")
+    ciphertext: str = Field(max_length=65536, description="Base64 encoded ciphertext of JSON payload")
     nonce: str = Field(description="Base64 encoded 12-byte nonce")
 
 

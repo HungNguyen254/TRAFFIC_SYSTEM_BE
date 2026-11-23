@@ -26,6 +26,7 @@ htmlcov/
 *.swo
 .DS_Store
 Thumbs.db
+docs/
 
 # Databases & local stores
 *.db

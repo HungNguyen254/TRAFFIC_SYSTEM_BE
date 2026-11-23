@@ -72,9 +72,14 @@ def _load_traffic_data_from_db(
             for edge_code, hour, dow, speed in rows:
                 code = (edge_code or "").strip()
                 if code:
-                    by_edge.setdefault(code, []).append((int(hour), int(dow), float(speed)))
-            _TRAFFIC_DATA_CACHE = by_edge
-            logger.info("Đã nạp %d edge từ bảng database traffic_data", len(by_edge))
+                    by_edge.setdefault(code, []).append(
+                        (int(hour), int(dow), float(speed))
+                    )
+            if by_edge:
+                _TRAFFIC_DATA_CACHE = by_edge
+                logger.info("Đã nạp %d edge từ bảng database traffic_data", len(by_edge))
+            else:
+                _TRAFFIC_DATA_CACHE = None
         except Exception as exc:  # noqa: BLE001
             logger.error("Lỗi đọc dữ liệu từ bảng traffic_data: %s", exc)
         finally:
@@ -91,15 +96,24 @@ def strip_accents(value: str) -> str:
     return without_marks.replace("đ", "d").replace("Đ", "d").lower()
 
 
-def _speed_to_congestion_level(speed_kmh: float) -> int:
-    """Đổi tốc độ trung bình thành mức ùn tắc 1..4 (khớp legend trên FE)."""
-    if speed_kmh >= 35.0:
+def compute_congestion_level(speed_kmh: float, max_speed_limit: float = 50.0) -> int:
+    """Đổi tốc độ trung bình thành mức ùn tắc 1..4 theo tỷ lệ tương đối với max_speed_limit.
+
+    Đường giới hạn thấp (vd: 30 km/h) vẫn đạt mức 1 khi chạy gần tốc độ tối đa (>= 70%).
+    """
+    limit = max(5.0, float(max_speed_limit))
+    ratio = speed_kmh / limit
+    if ratio >= 0.70 or speed_kmh >= 35.0:
         return 1  # Thông thoáng
-    if speed_kmh >= 25.0:
+    if ratio >= 0.50 or speed_kmh >= 25.0:
         return 2  # Di chuyển chậm
-    if speed_kmh >= 15.0:
+    if ratio >= 0.30 or speed_kmh >= 15.0:
         return 3  # Ùn tắc nghiêm trọng
     return 4  # Kẹt xe hoàn toàn
+
+
+def _speed_to_congestion_level(speed_kmh: float, max_speed_limit: float = 50.0) -> int:
+    return compute_congestion_level(speed_kmh, max_speed_limit)
 
 
 class _HourProfile(NamedTuple):
@@ -123,7 +137,9 @@ def _hour_is_rush_hour(hour: int) -> int:
     return 1 if (7 <= hour <= 9 or 17 <= hour <= 19) else 0
 
 
-def _load_hour_profiles(session: Session, edge_code: str) -> dict[tuple[int, int], _HourProfile]:
+def _load_hour_profiles(
+    session: Session, edge_code: str
+) -> dict[tuple[int, int], _HourProfile]:
     """Trung bình hoá traffic_data theo (hour_of_day, day_of_week) của một đoạn đường."""
     rows = session.exec(
         select(
@@ -337,7 +353,9 @@ class TrafficService:
         buckets: list[EdgeHourlyBucket] = []
         cursor = window_start
         while cursor < window_end:
-            buckets.append(_hour_bucket(cursor, profiles.get((cursor.hour, cursor.weekday()))))
+            buckets.append(
+                _hour_bucket(cursor, profiles.get((cursor.hour, cursor.weekday())))
+            )
             cursor += timedelta(hours=1)
 
         return EdgeHourlyHistoryResponse(
@@ -443,7 +461,9 @@ class TrafficService:
 
         new_edge_code = updates.get("edge_code")
         if new_edge_code is not None:
-            cls._ensure_edge_code_available(session, new_edge_code, exclude_edge_id=edge_id)
+            cls._ensure_edge_code_available(
+                session, new_edge_code, exclude_edge_id=edge_id
+            )
 
         from_node_id = updates.get("from_node_id", edge.from_node_id)
         to_node_id = updates.get("to_node_id", edge.to_node_id)
@@ -477,10 +497,7 @@ class TrafficService:
         nodes = list(session.exec(select(Node)).all())
         nodes_by_id = {node.node_id: node for node in nodes}
         edges = session.exec(select(Edge).order_by(Edge.edge_code)).all()
-        roads = [
-            cls._admin_road_response(edge, nodes_by_id)
-            for edge in edges
-        ]
+        roads = [cls._admin_road_response(edge, nodes_by_id) for edge in edges]
         districts = sorted(
             {node.district.strip() for node in nodes if node.district.strip()},
             key=str.casefold,
@@ -525,7 +542,7 @@ class TrafficService:
                         parsed.append(AdminRoadCoordinate(lat=lat, lng=lng))
                     if len(parsed) >= 2:
                         coordinates = parsed
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except TypeError, ValueError, json.JSONDecodeError:
                 coordinates = None
 
         has_geometry = coordinates is not None
@@ -556,6 +573,20 @@ class TrafficService:
         coordinate: AdminRoadCoordinate,
         position: str,
     ) -> Node:
+        # Check if an existing node is within ~30m (~0.0003 deg) to snap and maintain graph connectivity
+        snap_delta = 0.0003
+        existing_node = session.exec(
+            select(Node)
+            .where(
+                Node.latitude >= coordinate.lat - snap_delta,
+                Node.latitude <= coordinate.lat + snap_delta,
+                Node.longitude >= coordinate.lng - snap_delta,
+                Node.longitude <= coordinate.lng + snap_delta,
+            )
+        ).first()
+        if existing_node is not None:
+            return existing_node
+
         while True:
             node_code = f"ADM{uuid.uuid4().hex[:16]}{position}"
             if not session.exec(
@@ -563,13 +594,16 @@ class TrafficService:
             ).first():
                 break
 
-        return Node(
+        node = Node(
             node_code=node_code,
             node_name=f"{road.street_name[:90]} ({'đầu' if position == 'A' else 'cuối'})",
             district=road.district,
             latitude=coordinate.lat,
             longitude=coordinate.lng,
         )
+        session.add(node)
+        session.flush()
+        return node
 
     @staticmethod
     def _admin_road_geometry(road: AdminRoadPayload) -> str:
@@ -577,8 +611,7 @@ class TrafficService:
             {
                 "type": "LineString",
                 "coordinates": [
-                    [coordinate.lng, coordinate.lat]
-                    for coordinate in road.coordinates
+                    [coordinate.lng, coordinate.lat] for coordinate in road.coordinates
                 ],
             },
             separators=(",", ":"),
@@ -595,17 +628,13 @@ class TrafficService:
             delta_lng = math.radians(end.lng - start.lng)
             haversine = (
                 math.sin(delta_lat / 2) ** 2
-                + math.cos(lat1)
-                * math.cos(lat2)
-                * math.sin(delta_lng / 2) ** 2
+                + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lng / 2) ** 2
             )
             total += 2 * radius_km * math.asin(math.sqrt(min(1.0, haversine)))
         return total
 
     @staticmethod
-    def _delete_unused_road_nodes(
-        session: Session, node_ids: set[uuid.UUID]
-    ) -> None:
+    def _delete_unused_road_nodes(session: Session, node_ids: set[uuid.UUID]) -> None:
         for node_id in node_ids:
             referenced = session.exec(
                 select(Edge.edge_id)
@@ -619,7 +648,7 @@ class TrafficService:
             ).first()
             if referenced is None:
                 node = session.get(Node, node_id)
-                if node is not None:
+                if node is not None and node.node_code.startswith("ADM"):
                     session.delete(node)
 
     @classmethod
@@ -627,12 +656,8 @@ class TrafficService:
         cls, session: Session, road: AdminRoadPayload
     ) -> AdminRoadResponse:
         cls._ensure_edge_code_available(session, road.edge_code)
-        start_node = cls._admin_road_node(
-            session, road, road.coordinates[0], "A"
-        )
-        end_node = cls._admin_road_node(
-            session, road, road.coordinates[-1], "B"
-        )
+        start_node = cls._admin_road_node(session, road, road.coordinates[0], "A")
+        end_node = cls._admin_road_node(session, road, road.coordinates[-1], "B")
         edge = Edge(
             edge_code=road.edge_code,
             street_name=road.street_name,
@@ -665,12 +690,8 @@ class TrafficService:
             session, road.edge_code, exclude_edge_id=edge_id
         )
         old_node_ids = {edge.from_node_id, edge.to_node_id}
-        start_node = cls._admin_road_node(
-            session, road, road.coordinates[0], "A"
-        )
-        end_node = cls._admin_road_node(
-            session, road, road.coordinates[-1], "B"
-        )
+        start_node = cls._admin_road_node(session, road, road.coordinates[0], "A")
+        end_node = cls._admin_road_node(session, road, road.coordinates[-1], "B")
         session.add_all([start_node, end_node])
         edge.edge_code = road.edge_code
         edge.street_name = road.street_name
@@ -723,7 +744,10 @@ class TrafficService:
         exact = [s for h, d, s in records if h == hour_of_day and d == day_of_week]
         pool = exact or [s for h, _d, s in records if h == hour_of_day]
         if not pool:
-            return {"speed": round(default_speed, 1), "congestion_level": _speed_to_congestion_level(default_speed)}
+            return {
+                "speed": round(default_speed, 1),
+                "congestion_level": _speed_to_congestion_level(default_speed),
+            }
 
         speed = sum(pool) / len(pool)
         return {
@@ -752,16 +776,40 @@ class TrafficService:
         h = hour_of_day if hour_of_day is not None else now_local.hour
         d = day_of_week if day_of_week is not None else now_local.weekday()
 
-        nodes = list(session.exec(select(Node)).all())
-        edges = cls.get_all_edges(session)
-        node_by_id = {n.node_id: n for n in nodes}
+        has_bbox = min_lat is not None and max_lat is not None and min_lng is not None and max_lng is not None
+        if has_bbox:
+            # SQL pre-filtering for bbox (+ margin so crossing edges are not missed)
+            margin = 0.01
+            nodes_stmt = select(Node).where(
+                Node.latitude >= min_lat - margin,
+                Node.latitude <= max_lat + margin,
+                Node.longitude >= min_lng - margin,
+                Node.longitude <= max_lng + margin,
+            )
+            nodes = list(session.exec(nodes_stmt).all())
+            node_by_id = {n.node_id: n for n in nodes}
+            if node_by_id:
+                node_ids = set(node_by_id.keys())
+                edges = session.exec(
+                    select(Edge).where(
+                        or_(Edge.from_node_id.in_(node_ids), Edge.to_node_id.in_(node_ids))
+                    )
+                ).all()
+            else:
+                edges = []
+        else:
+            nodes = list(session.exec(select(Node)).all())
+            edges = cls.get_all_edges(session)
+            node_by_id = {n.node_id: n for n in nodes}
 
         filtered_items: list[EdgeStatusItem] = []
         for e in edges:
             from_node = node_by_id.get(e.from_node_id)
             to_node = node_by_id.get(e.to_node_id)
 
-            if not _is_edge_in_bbox(from_node, to_node, min_lat, min_lng, max_lat, max_lng):
+            if not _is_edge_in_bbox(
+                from_node, to_node, min_lat, min_lng, max_lat, max_lng
+            ):
                 continue
 
             if not _is_edge_in_district(from_node, to_node, district):
@@ -845,9 +893,31 @@ class TrafficService:
         Bổ sung timestamp updated_at.
         """
         now_utc = datetime.now(UTC)
-        nodes = list(session.exec(select(Node)).all())
-        edges = cls.get_all_edges(session)
-        node_by_id = {n.node_id: n for n in nodes}
+        has_bbox = min_lat is not None and max_lat is not None and min_lng is not None and max_lng is not None
+        if has_bbox:
+            # SQL pre-filtering for bbox (+ margin so crossing edges are not missed)
+            margin = 0.01
+            nodes_stmt = select(Node).where(
+                Node.latitude >= min_lat - margin,
+                Node.latitude <= max_lat + margin,
+                Node.longitude >= min_lng - margin,
+                Node.longitude <= max_lng + margin,
+            )
+            nodes = list(session.exec(nodes_stmt).all())
+            node_by_id = {n.node_id: n for n in nodes}
+            if node_by_id:
+                node_ids = set(node_by_id.keys())
+                edges = session.exec(
+                    select(Edge).where(
+                        or_(Edge.from_node_id.in_(node_ids), Edge.to_node_id.in_(node_ids))
+                    )
+                ).all()
+            else:
+                edges = []
+        else:
+            nodes = list(session.exec(select(Node)).all())
+            edges = cls.get_all_edges(session)
+            node_by_id = {n.node_id: n for n in nodes}
 
         edge_payload = []
         matched_node_ids = set()
@@ -856,13 +926,17 @@ class TrafficService:
             from_node = node_by_id.get(e.from_node_id)
             to_node = node_by_id.get(e.to_node_id)
 
-            if not _is_edge_in_bbox(from_node, to_node, min_lat, min_lng, max_lat, max_lng):
+            if not _is_edge_in_bbox(
+                from_node, to_node, min_lat, min_lng, max_lat, max_lng
+            ):
                 continue
 
             if not _is_edge_in_district(from_node, to_node, district):
                 continue
 
-            snapshot = cls.get_edge_traffic_snapshot(e, hour_of_day, day_of_week, session=session)
+            snapshot = cls.get_edge_traffic_snapshot(
+                e, hour_of_day, day_of_week, session=session
+            )
             if from_node:
                 matched_node_ids.add(from_node.node_id)
             if to_node:
@@ -899,9 +973,7 @@ class TrafficService:
             for param in (min_lat, min_lng, max_lat, max_lng, district)
         )
         filtered_nodes = (
-            [n for n in nodes if n.node_id in matched_node_ids]
-            if has_filter
-            else nodes
+            [n for n in nodes if n.node_id in matched_node_ids] if has_filter else nodes
         )
 
         node_payload = [

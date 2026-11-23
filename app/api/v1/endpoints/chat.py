@@ -6,6 +6,7 @@ from typing import Annotated
 
 from cryptography.exceptions import InvalidTag
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func
 from sqlmodel import select
 
 from app.core.crypto import (
@@ -34,9 +35,9 @@ from app.schemas.chat import (
     UpdateSessionTitleRequest,
     UserSaltResponse,
 )
-from app.services.gemini_service import GeminiService
+from app.services.gemini_service import GeminiService, get_gemini_service
 
-router = APIRouter(prefix="/chat", tags=["Chatbot AI E2E"])
+router = APIRouter(prefix="/chat", tags=["Chatbot AI"])
 
 
 @router.get(
@@ -135,24 +136,22 @@ async def send_message(
     body: SendMessageRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     session: SessionDep,
-    gemini_service: Annotated[GeminiService, Depends(GeminiService)],
+    gemini_service: Annotated[GeminiService, Depends(get_gemini_service)],
 ) -> StandardResponse[MessageResponse]:
     """Giải mã tin nhắn trong RAM, gọi Gemini API đa lượt, mã hóa câu trả lời và lưu trữ dạng ciphertext."""
     # Giới hạn chatbot: Standard chỉ 10 tin nhắn trong 24 giờ, Premium không giới hạn
     if current_user.plan != "premium":
         window_start = datetime.now(UTC) - timedelta(hours=24)
-        used_today = len(
-            session.exec(
-                select(ChatMessage)
-                .where(
-                    ChatMessage.role == "user",
-                    ChatMessage.created_at >= window_start,
-                    ChatMessage.session_id.in_(
-                        select(ChatSession.id).where(ChatSession.user_id == current_user.user_id)
-                    ),
-                )
-            ).all()
-        )
+        used_today = session.exec(
+            select(func.count(ChatMessage.id))
+            .where(
+                ChatMessage.role == "user",
+                ChatMessage.created_at >= window_start,
+                ChatMessage.session_id.in_(
+                    select(ChatSession.id).where(ChatSession.user_id == current_user.user_id)
+                ),
+            )
+        ).one()
         if used_today >= 10:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -235,11 +234,12 @@ async def send_message(
     past_messages = session.exec(
         select(ChatMessage)
         .where(ChatMessage.session_id == chat_session.id)
-        .order_by(ChatMessage.created_at.asc())
-    ).all()
+        .order_by(ChatMessage.created_at.desc())
+        .limit(10)
+    ).all()[::-1]
 
     contents: list[dict] = []
-    for msg in past_messages[-10:]:
+    for msg in past_messages:
         try:
             pt = decrypt_aes_gcm(k_session, msg.ciphertext, msg.nonce)
             txt = json.loads(pt.decode("utf-8")).get("content", "")

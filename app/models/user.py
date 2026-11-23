@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
+from sqlalchemy.orm import deferred
 from sqlmodel import Field, SQLModel
 
 from app.core.crypto import generate_salt
@@ -25,7 +26,7 @@ class User(SQLModel, table=True):
     avatar_content_type: str | None = Field(default=None, max_length=32, nullable=True)
     avatar_data: bytes | None = Field(
         default=None,
-        sa_column=sa.Column(sa.LargeBinary, nullable=True),
+        sa_column=deferred(sa.Column(sa.LargeBinary, nullable=True)),
     )
     avatar_updated_at: datetime | None = Field(default=None, nullable=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

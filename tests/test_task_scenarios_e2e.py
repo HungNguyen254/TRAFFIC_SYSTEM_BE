@@ -71,6 +71,7 @@ def engine_fixture(monkeypatch):
             longitude=105.9,
         )
         session.add_all([origin, dest, orphan])
+        session.flush()
         session.add(
             Edge(
                 edge_id=EDGE_UID,
@@ -227,8 +228,7 @@ def test_tc_a04_register_mat_khau_yeu(client):
             "full_name": "User Test",
         },
     )
-    if response.status_code != 422:
-        pytest.xfail(f"BUG-01: mong 422 nhưng nhận {response.status_code}")
+    assert response.status_code == 422
 
 
 def test_tc_a05_register_xac_nhan_khong_khop(client):
@@ -242,8 +242,7 @@ def test_tc_a05_register_xac_nhan_khong_khop(client):
             "full_name": "User Test",
         },
     )
-    if response.status_code != 422:
-        pytest.xfail(f"BUG-01: mong 422 nhưng nhận {response.status_code}")
+    assert response.status_code == 422
 
 
 def test_tc_a06_register_email_trung(client):
@@ -685,5 +684,4 @@ def test_tc_s07_map_forecast_theo_gio_phan_quyen(client, db):
     assert standard.status_code == 403
 
     guest = client.get("/api/v1/edges", params=params)
-    if guest.status_code != 403:
-        pytest.xfail(f"BUG-02: khách tra cứu theo giờ mong 403 nhưng nhận {guest.status_code}")
+    assert guest.status_code == 403
