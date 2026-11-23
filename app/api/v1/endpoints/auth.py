@@ -1,5 +1,5 @@
-from typing import Annotated
 from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
@@ -8,8 +8,8 @@ from app.core.limiter import limiter
 from app.core.response import StandardResponse, success_response
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.user_avatar import UserAvatar
 from app.schemas.auth import (
+    AvatarUploadResponse,
     ChangePasswordRequest,
     LoginRequest,
     RegisterRequest,
@@ -56,6 +56,7 @@ def register(request: Request, payload: RegisterRequest, session: SessionDep):
         role=user.role,
         plan=user.plan,
         created_at=user.created_at,
+        has_avatar=bool(user.avatar_data),
     )
     return success_response(request=request, message="Đăng ký tài khoản thành công", data=user_res)
 
@@ -86,6 +87,7 @@ def get_me(request: Request, current_user: Annotated[User, Depends(get_current_u
         role=current_user.role,
         plan=current_user.plan,
         created_at=current_user.created_at,
+        has_avatar=bool(current_user.avatar_data),
     )
     return success_response(request=request, message="Lấy thông tin thành công", data=user_res)
 
@@ -97,17 +99,15 @@ def get_me(request: Request, current_user: Annotated[User, Depends(get_current_u
 )
 def get_my_avatar(
     current_user: Annotated[User, Depends(get_current_user)],
-    session: SessionDep,
 ):
-    avatar = session.get(UserAvatar, current_user.user_id)
-    if not avatar:
+    if not current_user.avatar_data or not current_user.avatar_content_type:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tài khoản chưa có ảnh đại diện.",
         )
     return Response(
-        content=avatar.image_data,
-        media_type=avatar.content_type,
+        content=current_user.avatar_data,
+        media_type=current_user.avatar_content_type,
         headers={
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
@@ -117,7 +117,7 @@ def get_my_avatar(
 
 @router.put(
     "/me/avatar",
-    response_model=StandardResponse[dict[str, str]],
+    response_model=StandardResponse[AvatarUploadResponse],
     status_code=status.HTTP_200_OK,
     summary="Tải ảnh đại diện tài khoản",
 )
@@ -163,24 +163,17 @@ async def upload_my_avatar(
             detail="Tệp tải lên không khớp định dạng ảnh đã chọn.",
         )
 
-    avatar = session.get(UserAvatar, current_user.user_id)
-    if avatar:
-        avatar.content_type = content_type
-        avatar.image_data = bytes(image_data)
-        avatar.updated_at = datetime.now(UTC)
-    else:
-        avatar = UserAvatar(
-            user_id=current_user.user_id,
-            content_type=content_type,
-            image_data=bytes(image_data),
-        )
-    session.add(avatar)
+    current_user.avatar_content_type = content_type
+    current_user.avatar_data = bytes(image_data)
+    current_user.avatar_updated_at = datetime.now(UTC)
+    session.add(current_user)
     session.commit()
+    session.refresh(current_user)
 
     return success_response(
         request=request,
         message="Cập nhật ảnh đại diện thành công.",
-        data={"content_type": content_type},
+        data=AvatarUploadResponse(content_type=content_type),
     )
 
 
@@ -195,10 +188,13 @@ def delete_my_avatar(
     session: SessionDep,
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    avatar = session.get(UserAvatar, current_user.user_id)
-    if avatar:
-        session.delete(avatar)
+    if current_user.avatar_data is not None:
+        current_user.avatar_content_type = None
+        current_user.avatar_data = None
+        current_user.avatar_updated_at = None
+        session.add(current_user)
         session.commit()
+        session.refresh(current_user)
     return success_response(
         request=request,
         message="Đã xóa ảnh đại diện.",
