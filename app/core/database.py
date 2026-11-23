@@ -36,31 +36,32 @@ engine = create_engine(
 )
 
 
-def _apply_schema_patches() -> None:
+def _apply_schema_patches(target_engine=None) -> None:
     """Ensure missing columns in existing tables are added if tables existed before schema updates."""
     from sqlalchemy import inspect
     from app.core.crypto import generate_salt
 
+    db_engine = target_engine or engine
     try:
-        inspector = inspect(engine)
+        inspector = inspect(db_engine)
         if inspector.has_table("users"):
             user_cols = {c["name"] for c in inspector.get_columns("users")}
             if "plan" not in user_cols:
                 logger.info("Applying schema patch: adding missing 'plan' column to 'users' table...")
-                with engine.begin() as conn:
+                with db_engine.begin() as conn:
                     conn.execute(
                         text("ALTER TABLE users ADD COLUMN plan VARCHAR(20) DEFAULT 'standard' NOT NULL")
                     )
                 logger.info("Schema patch for 'users.plan' applied successfully.")
             if "plan_updated_at" not in user_cols:
-                with engine.begin() as conn:
+                with db_engine.begin() as conn:
                     conn.execute(
                         text("ALTER TABLE users ADD COLUMN plan_updated_at TIMESTAMP WITH TIME ZONE")
                     )
                 logger.info("Schema patch for 'users.plan_updated_at' applied successfully.")
             if "encryption_salt" not in user_cols:
                 logger.info("Applying schema patch: adding missing 'encryption_salt' to 'users' table...")
-                with engine.begin() as conn:
+                with db_engine.begin() as conn:
                     conn.execute(
                         text("ALTER TABLE users ADD COLUMN encryption_salt VARCHAR(64)")
                     )
@@ -73,6 +74,42 @@ def _apply_schema_patches() -> None:
                             {"salt": generate_salt(), "uid": r[0]},
                         )
                 logger.info("Schema patch for 'users.encryption_salt' applied successfully.")
+            if "avatar_content_type" not in user_cols:
+                logger.info("Applying schema patch: adding missing 'avatar_content_type' to 'users' table...")
+                with db_engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN avatar_content_type VARCHAR(32)")
+                    )
+                logger.info("Schema patch for 'users.avatar_content_type' applied successfully.")
+            if "avatar_data" not in user_cols:
+                logger.info("Applying schema patch: adding missing 'avatar_data' to 'users' table...")
+                blob_type = "BYTEA" if "postgresql" in str(db_engine.url) else "BLOB"
+                with db_engine.begin() as conn:
+                    conn.execute(
+                        text(f"ALTER TABLE users ADD COLUMN avatar_data {blob_type}")
+                    )
+                logger.info("Schema patch for 'users.avatar_data' applied successfully.")
+            if "avatar_updated_at" not in user_cols:
+                logger.info("Applying schema patch: adding missing 'avatar_updated_at' to 'users' table...")
+                ts_type = "TIMESTAMP WITH TIME ZONE" if "postgresql" in str(db_engine.url) else "DATETIME"
+                with db_engine.begin() as conn:
+                    conn.execute(
+                        text(f"ALTER TABLE users ADD COLUMN avatar_updated_at {ts_type}")
+                    )
+                logger.info("Schema patch for 'users.avatar_updated_at' applied successfully.")
+            if inspector.has_table("user_avatars"):
+                logger.info("Applying schema patch: migrating existing avatars from 'user_avatars' to 'users'...")
+                with db_engine.begin() as conn:
+                    conn.execute(
+                        text("""
+                            UPDATE users
+                            SET avatar_content_type = (SELECT content_type FROM user_avatars WHERE user_avatars.user_id = users.user_id),
+                                avatar_data = (SELECT image_data FROM user_avatars WHERE user_avatars.user_id = users.user_id),
+                                avatar_updated_at = (SELECT updated_at FROM user_avatars WHERE user_avatars.user_id = users.user_id)
+                            WHERE user_id IN (SELECT user_id FROM user_avatars)
+                        """)
+                    )
+                logger.info("Avatar migration completed.")
     except Exception as exc:
         logger.warning("Schema patch check encountered an error: %s", exc)
 

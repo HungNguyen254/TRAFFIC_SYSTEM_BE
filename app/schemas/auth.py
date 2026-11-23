@@ -60,6 +60,11 @@ class UpgradePlanResponse(BaseModel):
     message: str
 
 
+class AvatarUploadResponse(BaseModel):
+    content_type: str
+    message: str = "Cập nhật ảnh đại diện thành công."
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -74,4 +79,5 @@ class UserResponse(BaseModel):
     full_name: str
     role: str
     plan: str = "standard"
+    has_avatar: bool = False
     created_at: datetime
