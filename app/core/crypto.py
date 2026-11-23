@@ -1,5 +1,6 @@
 import base64
 import os
+
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -30,8 +31,9 @@ def generate_x25519_keypair() -> tuple[x25519.X25519PrivateKey, str]:
 
 
 def _get_chat_secret_seed() -> bytes:
-    key_str = settings.CHAT_MASTER_KEY or settings.JWT_SECRET_KEY
-    return key_str.encode("utf-8")
+    if settings.CHAT_MASTER_KEY:
+        return settings.CHAT_MASTER_KEY.encode("utf-8")
+    return f"chat-master-seed:{settings.JWT_SECRET_KEY}".encode("utf-8")
 
 
 def get_server_x25519_keypair() -> tuple[x25519.X25519PrivateKey, str]:
@@ -51,14 +53,18 @@ def get_server_x25519_keypair() -> tuple[x25519.X25519PrivateKey, str]:
     return private_key, public_key_b64
 
 
-def derive_shared_secret(private_key: x25519.X25519PrivateKey, peer_public_key_b64: str) -> bytes:
+def derive_shared_secret(
+    private_key: x25519.X25519PrivateKey, peer_public_key_b64: str
+) -> bytes:
     """Compute ECDH shared secret using local private key and peer's base64 public key."""
     peer_pub_bytes = base64.b64decode(peer_public_key_b64)
     peer_public_key = x25519.X25519PublicKey.from_public_bytes(peer_pub_bytes)
     return private_key.exchange(peer_public_key)
 
 
-def derive_key_hkdf(shared_secret: bytes, salt: bytes, info: bytes, length: int = 32) -> bytes:
+def derive_key_hkdf(
+    shared_secret: bytes, salt: bytes, info: bytes, length: int = 32
+) -> bytes:
     """Derive a fixed-length symmetric key from a shared secret using HKDF SHA-256."""
     hkdf = HKDF(
         algorithm=hashes.SHA256(),
@@ -76,14 +82,14 @@ def derive_user_master_key(password: str, salt_b64: str) -> bytes:
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
-        iterations=100_000,
+        iterations=600_000,
     )
     return kdf.derive(password.encode("utf-8"))
 
 
 def encrypt_aes_gcm(key: bytes, plaintext: bytes) -> tuple[str, str]:
     """Encrypt plaintext using AES-256-GCM with a random 12-byte nonce.
-    
+
     Returns (ciphertext_b64, nonce_b64).
     """
     nonce = os.urandom(12)
@@ -97,7 +103,7 @@ def encrypt_aes_gcm(key: bytes, plaintext: bytes) -> tuple[str, str]:
 
 def decrypt_aes_gcm(key: bytes, ciphertext_b64: str, nonce_b64: str) -> bytes:
     """Decrypt ciphertext using AES-256-GCM.
-    
+
     Raises cryptography.exceptions.InvalidTag if tampered or incorrect key.
     """
     ciphertext = base64.b64decode(ciphertext_b64)

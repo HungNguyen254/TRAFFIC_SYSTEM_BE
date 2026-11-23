@@ -24,6 +24,11 @@ class RegisterRequest(BaseModel):
     confirm_password: str = Field(min_length=6)
     full_name: str = Field(min_length=1, max_length=100)
 
+    @field_validator("email")
+    @classmethod
+    def email_to_lowercase(cls, value: str) -> str:
+        return value.strip().lower()
+
     @field_validator("password")
     @classmethod
     def password_must_be_strong(cls, password: str) -> str:
@@ -42,6 +47,11 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def email_to_lowercase(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 class ChangePasswordRequest(BaseModel):

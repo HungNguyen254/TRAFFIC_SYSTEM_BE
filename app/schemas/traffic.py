@@ -48,8 +48,8 @@ class EdgeUpdate(BaseModel):
     street_name: str | None = None
     from_node_id: uuid.UUID | None = None
     to_node_id: uuid.UUID | None = None
-    length_km: float | None = None
-    max_speed_limit: int | None = None
+    length_km: float | None = Field(default=None, gt=0)
+    max_speed_limit: int | None = Field(default=None, gt=0)
     geom: str | None = None
 
 

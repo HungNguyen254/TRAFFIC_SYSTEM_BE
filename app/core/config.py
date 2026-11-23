@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
         env = self.ENVIRONMENT.lower()
-        if env not in {"dev", "test", "development"}:
+        if env not in {"dev", "test", "development"}:  # noqa: SIM102
             if (
                 self.JWT_SECRET_KEY in INSECURE_DEFAULT_JWT_SECRETS
                 or self.JWT_SECRET_KEY.startswith("dev-secret")

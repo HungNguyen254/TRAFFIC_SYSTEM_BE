@@ -85,9 +85,19 @@ def train_model(
         X = np.array(X_list, dtype=np.float32)
         y = np.array(y_list, dtype=np.float32)
 
-        model = RandomForestRegressor(n_estimators=40, max_depth=10, random_state=42, n_jobs=-1)
-        model.fit(X, y)
-        r2_score = float(model.score(X, y))
+        from sklearn.model_selection import train_test_split
+
+        if len(rows) >= 20:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
+            )
+            model = RandomForestRegressor(n_estimators=40, max_depth=10, random_state=42, n_jobs=-1)
+            model.fit(X_train, y_train)
+            r2_score = float(model.score(X_test, y_test))
+        else:
+            model = RandomForestRegressor(n_estimators=40, max_depth=10, random_state=42, n_jobs=-1)
+            model.fit(X, y)
+            r2_score = float(model.score(X, y))
 
         # Serialize model to bytes
         buffer = io.BytesIO()
@@ -116,6 +126,17 @@ def train_model(
             is_active=True,
         )
         db_session.add(db_model)
+
+        # Cleanup old inactive models: keep at most latest 2 inactive versions to avoid DB bloat
+        old_models = db_session.exec(
+            select(MLModel)
+            .where(MLModel.model_name == model_name, MLModel.is_active == False)
+            .order_by(MLModel.version.desc())
+        ).all()
+        if len(old_models) > 2:
+            for extra in old_models[2:]:
+                db_session.delete(extra)
+
         db_session.commit()
         db_session.refresh(db_model)
 

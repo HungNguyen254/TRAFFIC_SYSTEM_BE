@@ -3,7 +3,8 @@ from collections.abc import Generator
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.core.config import settings
@@ -36,9 +37,22 @@ engine = create_engine(
 )
 
 
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record) -> None:
+    """Enable foreign key constraints for SQLite connections on the application engine."""
+    if "sqlite" in db_url:
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+
 def _apply_schema_patches(target_engine=None) -> None:
     """Ensure missing columns in existing tables are added if tables existed before schema updates."""
     from sqlalchemy import inspect
+
     from app.core.crypto import generate_salt
 
     db_engine = target_engine or engine
@@ -107,16 +121,17 @@ def _apply_schema_patches(target_engine=None) -> None:
                                 avatar_data = (SELECT image_data FROM user_avatars WHERE user_avatars.user_id = users.user_id),
                                 avatar_updated_at = (SELECT updated_at FROM user_avatars WHERE user_avatars.user_id = users.user_id)
                             WHERE user_id IN (SELECT user_id FROM user_avatars)
+                              AND (users.avatar_data IS NULL)
                         """)
                     )
-                logger.info("Avatar migration completed.")
-    except Exception as exc:
+                    conn.execute(text("DROP TABLE user_avatars"))
+                logger.info("Avatar migration completed and old user_avatars table dropped.")
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Schema patch check encountered an error: %s", exc)
 
 
 def init_db() -> None:
     """Create all database tables defined in SQLModel metadata and run minor schema patches."""
-    import app.models
     SQLModel.metadata.create_all(engine)
     _apply_schema_patches()
 

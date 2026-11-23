@@ -77,3 +77,8 @@ class GeminiService:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Lỗi phân tích cú pháp phản hồi từ Gemini API: {str(exc)}",
             ) from exc
+
+
+def get_gemini_service() -> GeminiService:
+    """Dependency provider without parameters to prevent FastAPI from exposing GeminiService.__init__ as query parameters."""
+    return GeminiService()

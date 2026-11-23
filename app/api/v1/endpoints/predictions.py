@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
 from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.database import SessionDep
 from app.core.limiter import limiter

@@ -1,14 +1,15 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
-from fastapi.middleware.cors import CORSMiddleware  # <-- Đã thêm CORS
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1.router import api_v1_router
 from app.core.config import settings
 from app.core.database import check_db_connection, init_db
 from app.core.handlers import register_handler
+from app.core.limiter import limiter
 from app.core.response import StandardResponse, success_response
 from app.middlewares.middleware import setup_middleware
 from app.services.prediction_service import PredictionService
@@ -19,26 +20,22 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    db_target = "SQLite" if "sqlite" in settings.DATABASE_URL else "PostgreSQL"
     try:
         check_db_connection()
         init_db()
-        logger.info("Successfully connected to Supabase PostgreSQL.")
+        logger.info("Successfully connected to %s database.", db_target)
     except (SQLAlchemyError, OSError) as exc:
-        logger.error("Failed to connect to Supabase PostgreSQL: %s", exc)
+        logger.error("Failed to connect to %s database: %s", db_target, exc)
+        if not os.environ.get("PYTEST_CURRENT_TEST") and getattr(settings, "ENVIRONMENT", "").lower() not in {"test", "testing"}:
+            raise RuntimeError(f"Database connection failed: {exc}") from exc
     
     PredictionService.load_model()
     yield
 
 
 app = FastAPI(title="Traffic System BE", version="0.1.2", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.state.limiter = limiter
 
 setup_middleware(app)
 register_handler(app)

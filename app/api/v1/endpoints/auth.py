@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
+from app.core.config import settings
 from app.core.database import SessionDep
 from app.core.limiter import limiter
 from app.core.response import StandardResponse, success_response
@@ -208,12 +209,18 @@ def delete_my_avatar(
     status_code=status.HTTP_200_OK,
     summary="Nâng cấp tài khoản lên gói Premium (chưa tích hợp cổng thanh toán)",
 )
+@limiter.limit("5/minute")
 def upgrade_plan(
     request: Request,
     session: SessionDep,
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Tự động nâng cấp lên Premium khi người dùng chọn gói (demo, chưa cần thanh toán)."""
+    if settings.ENVIRONMENT.lower() not in {"dev", "test", "development"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tính năng tự nâng cấp chỉ khả dụng trong môi trường thử nghiệm (demo).",
+        )
     if current_user.plan != "premium":
         current_user.plan = "premium"
         current_user.plan_updated_at = datetime.now(UTC)
@@ -238,6 +245,7 @@ def upgrade_plan(
     status_code=status.HTTP_200_OK,
     summary="Hủy gói Premium, quay về Standard",
 )
+@limiter.limit("5/minute")
 def cancel_premium(
     request: Request,
     session: SessionDep,

@@ -27,6 +27,7 @@ from app.schemas.prediction import (
     RouteForecastResponse,
     RouteForecastStepResponse,
 )
+from app.services.traffic_service import compute_congestion_level
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +89,9 @@ class PredictionService:
     @staticmethod
     def _weather_to_code(weather: str) -> float:
         w = weather.lower().strip()
-        if "heavy" in w or "ngập" in w or "to" in w:
+        if "heavy" in w or "ngập" in w or "mưa to" in w or "mua to" in w or w == "to":
             return 2.0
-        elif "rain" in w or "mưa" in w:
+        elif "rain" in w or "mưa" in w or "mua" in w:
             return 1.0
         return 0.0
 
@@ -186,17 +187,14 @@ class PredictionService:
         speed_ratio = predicted_speed / float(edge.max_speed_limit)
         risk_factor = round(max(0.0, min(1.0, 1.0 - speed_ratio)), 2)
 
-        if predicted_speed >= 35.0:
-            congestion_level = 1
+        congestion_level = compute_congestion_level(predicted_speed, edge.max_speed_limit)
+        if congestion_level == 1:
             desc = "Đường rất thông thoáng, di chuyển thuận lợi"
-        elif predicted_speed >= 25.0:
-            congestion_level = 2
+        elif congestion_level == 2:
             desc = "Lưu lượng bình thường, tốc độ ổn định"
-        elif predicted_speed >= 15.0:
-            congestion_level = 3
+        elif congestion_level == 3:
             desc = "Đông đúc, nguy cơ ùn ứ vào khung giờ này"
         else:
-            congestion_level = 4
             desc = "Tắc nghẽn nghiêm trọng, nên chọn lộ trình tránh"
 
         return predicted_speed, risk_factor, congestion_level, desc
@@ -294,7 +292,7 @@ class PredictionService:
         for offset in sorted_minutes:
             target_time = base_time + timedelta(minutes=offset)
             if target_time.tzinfo is None:
-                local_target = target_time.replace(tzinfo=UTC).astimezone(LOCAL_TZ)
+                local_target = target_time.replace(tzinfo=LOCAL_TZ)
             else:
                 local_target = target_time.astimezone(LOCAL_TZ)
 
@@ -363,7 +361,7 @@ class PredictionService:
 
             target_time = base_time + timedelta(minutes=offset)
             if target_time.tzinfo is None:
-                local_target = target_time.replace(tzinfo=UTC).astimezone(LOCAL_TZ)
+                local_target = target_time.replace(tzinfo=LOCAL_TZ)
             else:
                 local_target = target_time.astimezone(LOCAL_TZ)
 
@@ -405,31 +403,79 @@ class PredictionService:
         edges = session.exec(select(Edge).order_by(Edge.street_name, Edge.edge_code)).all()
 
         forecast_edges = []
-        for edge in edges:
-            speed, risk, level, description = cls._compute_prediction_values(
-                edge=edge,
-                hour_of_day=local_target.hour,
-                day_of_week=local_target.weekday(),
-                weather=payload.weather,
-            )
-            ensemble_agreement = cls._compute_ensemble_agreement(
-                edge=edge,
-                hour_of_day=local_target.hour,
-                day_of_week=local_target.weekday(),
-                weather=payload.weather,
-            )
-            forecast_edges.append(
-                MapForecastEdge(
-                    edge_id=edge.edge_id,
-                    street_name=edge.street_name,
-                    max_speed_limit=edge.max_speed_limit,
-                    predicted_speed=speed,
-                    risk_factor=risk,
-                    congestion_level=level,
-                    description=description,
-                    ensemble_agreement=ensemble_agreement,
+        model = cls._model
+        if model is not None and len(edges) > 0 and hasattr(model, "predict"):
+            try:
+                features_matrix = np.array([
+                    cls._build_prediction_features(
+                        edge=edge,
+                        hour_of_day=local_target.hour,
+                        day_of_week=local_target.weekday(),
+                        weather=payload.weather,
+                    )[0]
+                    for edge in edges
+                ], dtype=np.float32)
+
+                batch_preds = model.predict(features_matrix)
+                if len(batch_preds) == len(edges):
+                    for i, edge in enumerate(edges):
+                        speed = max(5.0, min(float(edge.max_speed_limit), round(float(batch_preds[i]), 1)))
+                        speed_ratio = speed / float(edge.max_speed_limit)
+                        risk_factor = round(max(0.0, min(1.0, 1.0 - speed_ratio)), 2)
+                        level = compute_congestion_level(speed, edge.max_speed_limit)
+                        desc = (
+                            "Đường rất thông thoáng, di chuyển thuận lợi" if level == 1
+                            else "Lưu lượng bình thường, tốc độ ổn định" if level == 2
+                            else "Đông đúc, nguy cơ ùn ứ vào khung giờ này" if level == 3
+                            else "Tắc nghẽn nghiêm trọng, nên chọn lộ trình tránh"
+                        )
+                        ensemble_agreement = cls._compute_ensemble_agreement(
+                            edge=edge,
+                            hour_of_day=local_target.hour,
+                            day_of_week=local_target.weekday(),
+                            weather=payload.weather,
+                        )
+                        forecast_edges.append(
+                            MapForecastEdge(
+                                edge_id=edge.edge_id,
+                                street_name=edge.street_name,
+                                max_speed_limit=edge.max_speed_limit,
+                                predicted_speed=speed,
+                                risk_factor=risk_factor,
+                                congestion_level=level,
+                                description=desc,
+                                ensemble_agreement=ensemble_agreement,
+                            )
+                        )
+            except Exception:
+                forecast_edges = []
+
+        if not forecast_edges:
+            for edge in edges:
+                speed, risk, level, description = cls._compute_prediction_values(
+                    edge=edge,
+                    hour_of_day=local_target.hour,
+                    day_of_week=local_target.weekday(),
+                    weather=payload.weather,
                 )
-            )
+                ensemble_agreement = cls._compute_ensemble_agreement(
+                    edge=edge,
+                    hour_of_day=local_target.hour,
+                    day_of_week=local_target.weekday(),
+                    weather=payload.weather,
+                )
+                forecast_edges.append(
+                    MapForecastEdge(
+                        edge_id=edge.edge_id,
+                        street_name=edge.street_name,
+                        max_speed_limit=edge.max_speed_limit,
+                        predicted_speed=speed,
+                        risk_factor=risk,
+                        congestion_level=level,
+                        description=description,
+                        ensemble_agreement=ensemble_agreement,
+                    )
+                )
 
         return MapForecastResponse(
             minutes_ahead=payload.minutes_ahead,

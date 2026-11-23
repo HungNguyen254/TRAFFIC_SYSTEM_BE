@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.exceptions import AppException
@@ -36,12 +37,28 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 async def validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    logger.warning("[ValidationError] %s | %s", request.url.path, exc.errors())
+    cleaned_errors = []
+    for err in exc.errors():
+        clean_err = dict(err)
+        if "ctx" in clean_err and isinstance(clean_err["ctx"], dict):
+            clean_err["ctx"] = {k: str(v) for k, v in clean_err["ctx"].items()}
+        cleaned_errors.append(clean_err)
+    logger.warning("[ValidationError] %s | %s", request.url.path, cleaned_errors)
     return error_response(
         request=request,
         message="Dữ liệu đầu vào không hợp lệ!",
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        error=exc.errors(),
+        error=cleaned_errors,
+    )
+
+
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    logger.warning("[RateLimitExceeded] %s | %s", request.url.path, exc.detail)
+    return error_response(
+        request=request,
+        message=f"Quá giới hạn yêu cầu (Rate limit exceeded): {exc.detail}",
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        error="RATE_LIMIT_EXCEEDED",
     )
 
 
@@ -90,6 +107,7 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 
 def register_handler(app: FastAPI) -> None:
+    app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
     app.add_exception_handler(AppException, app_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
