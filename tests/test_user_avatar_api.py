@@ -152,17 +152,58 @@ def test_user_model_avatar_fields_default_to_none():
     assert user.avatar_updated_at is None
 
 
-def test_user_response_schema_has_avatar():
-    from app.schemas.auth import UserResponse
+def test_apply_schema_patches_migrates_avatar_data():
+    from sqlalchemy import text
+    from app.core.database import _apply_schema_patches
 
-    res = UserResponse(
-        user_id=uuid.uuid4(),
-        email="test@example.com",
-        full_name="Test User",
-        role="user",
-        plan="standard",
-        created_at=datetime.now(UTC),
-        has_avatar=True,
+    test_engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
-    assert res.has_avatar is True
+    # Create legacy users table without avatar fields and legacy user_avatars table
+    with test_engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE users (
+                user_id CHAR(32) PRIMARY KEY,
+                email VARCHAR(100) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                full_name VARCHAR(100) NOT NULL,
+                role VARCHAR(20) NOT NULL,
+                plan VARCHAR(20) NOT NULL,
+                plan_updated_at DATETIME,
+                token_version INTEGER NOT NULL,
+                encryption_salt VARCHAR(64) NOT NULL,
+                created_at DATETIME NOT NULL
+            );
+        """))
+        conn.execute(text("""
+            CREATE TABLE user_avatars (
+                user_id CHAR(32) PRIMARY KEY,
+                content_type VARCHAR(32) NOT NULL,
+                image_data BLOB NOT NULL,
+                updated_at DATETIME NOT NULL
+            );
+        """))
+        uid = uuid.uuid4().hex
+        conn.execute(text(f"""
+            INSERT INTO users (user_id, email, password_hash, full_name, role, plan, token_version, encryption_salt, created_at)
+            VALUES ('{uid}', 'migrated@example.com', 'hash', 'Migrated User', 'user', 'standard', 1, 'salt', '2026-01-01 00:00:00')
+        """))
+        conn.execute(
+            text("INSERT INTO user_avatars (user_id, content_type, image_data, updated_at) VALUES (:uid, :ct, :img, :up)"),
+            {"uid": uid, "ct": "image/png", "img": b"fake-png-data", "up": "2026-01-01 00:00:00"},
+        )
+
+    _apply_schema_patches(test_engine)
+
+    with test_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT avatar_content_type, avatar_data FROM users WHERE user_id = :uid"),
+            {"uid": uid},
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "image/png"
+        assert row[1] == b"fake-png-data"
+
 
