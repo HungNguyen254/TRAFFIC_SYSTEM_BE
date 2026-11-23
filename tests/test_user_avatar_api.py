@@ -1,3 +1,6 @@
+import uuid
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
@@ -116,3 +119,31 @@ def test_avatar_upload_rejects_mismatched_and_oversized_images(client, auth_head
         headers={**auth_headers, "Content-Type": "image/png"},
     )
     assert response.status_code == 413
+
+
+def test_user_model_avatar_fields_default_to_none():
+    user = User(
+        email="test-defaults@example.com",
+        password_hash="hash",
+        full_name="Default User",
+        role="user",
+    )
+    assert user.avatar_content_type is None
+    assert user.avatar_data is None
+    assert user.avatar_updated_at is None
+
+
+def test_user_response_schema_has_avatar():
+    from app.schemas.auth import UserResponse
+
+    res = UserResponse(
+        user_id=uuid.uuid4(),
+        email="test@example.com",
+        full_name="Test User",
+        role="user",
+        plan="standard",
+        created_at=datetime.now(UTC),
+        has_avatar=True,
+    )
+    assert res.has_avatar is True
+

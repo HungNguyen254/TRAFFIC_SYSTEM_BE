@@ -18,9 +18,14 @@ class User(SQLModel, table=True):
     password_hash: str = Field(max_length=255)
     full_name: str = Field(max_length=100)
     role: str = Field(default="user", max_length=20)
-    # Gói người dùng: "standard" (mặc định) hoặc "premium"
-    plan: str = Field(default="standard", max_length=20)
+    plan: str = Field(default="standard", max_length=20) # Gói người dùng: "standard" (mặc định) hoặc "premium"
     plan_updated_at: datetime | None = Field(default=None, nullable=True)
     token_version: int = Field(default=1, nullable=False)
     encryption_salt: str = Field(default_factory=generate_salt, max_length=64, nullable=False)
+    avatar_content_type: str | None = Field(default=None, max_length=32, nullable=True)
+    avatar_data: bytes | None = Field(
+        default=None,
+        sa_column=sa.Column(sa.LargeBinary, nullable=True),
+    )
+    avatar_updated_at: datetime | None = Field(default=None, nullable=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
