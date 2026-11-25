@@ -1,5 +1,6 @@
 """Seed script to populate prominent Hanoi intersections (Nodes) and road segments (Edges)."""
 
+import json
 import logging
 import random
 import sys
@@ -43,8 +44,8 @@ HANOI_NODES = [
         "node_code": "NODE_TDH",
         "node_name": "Nút giao Trần Duy Hưng - Hoàng Đạo Thúy",
         "district": "Cầu Giấy",
-        "latitude": 21.0098,
-        "longitude": 105.8012,
+        "latitude": 21.01063,
+        "longitude": 105.79960,
     },
     {
         "node_code": "NODE_KM",
@@ -71,8 +72,8 @@ HANOI_NODES = [
         "node_code": "NODE_DCV",
         "node_name": "Ngã tư Đại Cồ Việt - Giải Phóng",
         "district": "Hai Bà Trưng",
-        "latitude": 21.0089,
-        "longitude": 105.8432,
+        "latitude": 21.007822,
+        "longitude": 105.841468,
     },
     {
         "node_code": "NODE_BHK",
@@ -162,8 +163,8 @@ HANOI_NODES = [
         "node_code": "NODE_TKC",
         "node_name": "Nút giao Trần Khát Chân - Bạch Mai",
         "district": "Hai Bà Trưng",
-        "latitude": 21.0000,
-        "longitude": 105.8520,
+        "latitude": 21.008583,
+        "longitude": 105.851410,
     },
     {
         "node_code": "NODE_GV",
@@ -688,6 +689,29 @@ HANOI_EDGES = [
 ]
 
 
+NODE_SYNC_FIELDS = ("node_name", "district", "latitude", "longitude")
+
+
+def _sync_node(node: Node, n_data: dict[str, str | float]) -> bool:
+    """Cập nhật node đã có theo dữ liệu seed. Trả về True nếu có thay đổi."""
+    changed = False
+    for field in NODE_SYNC_FIELDS:
+        if getattr(node, field) != n_data[field]:
+            setattr(node, field, n_data[field])
+            changed = True
+    return changed
+
+
+def _is_straight_line_geom(geom: str | None) -> bool:
+    if not geom:
+        return False
+    try:
+        coordinates = json.loads(geom).get("coordinates")
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return isinstance(coordinates, list) and len(coordinates) <= 2
+
+
 def _build_traffic_profile(
     edge_data: dict[str, str | float | int], hour: int, day_of_week: int
 ) -> TrafficData:
@@ -795,8 +819,9 @@ def seed_network(db_session: Session | None = None) -> None:
         init_db()
         session = Session(engine)
     try:
-        # 1. Seed Nodes
+        # 1. Seed Nodes (tạo mới hoặc đồng bộ tọa độ/tên theo dữ liệu seed)
         code_to_node = {}
+        nodes_updated = 0
         for n_data in HANOI_NODES:
             existing = session.exec(
                 select(Node).where(Node.node_code == n_data["node_code"])
@@ -808,13 +833,24 @@ def seed_network(db_session: Session | None = None) -> None:
                 session.refresh(node)
                 code_to_node[node.node_code] = node
             else:
+                if _sync_node(existing, n_data):
+                    session.add(existing)
+                    nodes_updated += 1
                 code_to_node[existing.node_code] = existing
+        session.commit()
 
         # 2. Seed Edges
+        straight_geoms_cleared = 0
         for e_data in HANOI_EDGES:
             existing_edge = session.exec(
                 select(Edge).where(Edge.edge_code == e_data["edge_code"])
             ).first()
+            if existing_edge and _is_straight_line_geom(existing_edge.geom):
+                # Geometry 2 điểm chỉ là đường thẳng nối 2 nút: xóa để frontend
+                # căn lại theo đường thực tế (OSRM) từ tọa độ nút.
+                existing_edge.geom = None
+                session.add(existing_edge)
+                straight_geoms_cleared += 1
             if not existing_edge:
                 edge = Edge(
                     edge_code=e_data["edge_code"],
@@ -830,7 +866,9 @@ def seed_network(db_session: Session | None = None) -> None:
         print(
             f"Successfully seeded {len(HANOI_NODES)} nodes, "
             f"{len(HANOI_EDGES)} edges, and "
-            f"{traffic_profiles_added} traffic profiles."
+            f"{traffic_profiles_added} traffic profiles. "
+            f"Updated {nodes_updated} node(s), "
+            f"cleared {straight_geoms_cleared} straight-line edge geometry(ies)."
         )
     finally:
         if db_session is None:
